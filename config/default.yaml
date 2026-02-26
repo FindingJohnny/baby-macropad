@@ -1,0 +1,128 @@
+device:
+  brightness: 80
+  led_idle_color: [30, 0, 60]  # dim purple
+
+baby_basics:
+  api_url: "https://dev.baby.bretzfam.com/api/v1"
+  token: "${BB_API_TOKEN}"
+  child_id: "your-child-uuid-here"
+
+home_assistant:
+  url: "http://homeassistant.local:8123"
+  token: "${HA_TOKEN}"
+  enabled: false
+
+buttons:
+  1:
+    label: "Breast L"
+    icon: "breast_left"
+    action: "baby_basics.log_feeding"
+    params:
+      type: "breast"
+      started_side: "left"
+    feedback:
+      success_led: [0, 255, 0]
+
+  2:
+    label: "Breast R"
+    icon: "breast_right"
+    action: "baby_basics.log_feeding"
+    params:
+      type: "breast"
+      started_side: "right"
+    feedback:
+      success_led: [0, 255, 0]
+
+  3:
+    label: "Bottle"
+    icon: "bottle"
+    action: "baby_basics.log_feeding"
+    params:
+      type: "bottle"
+      amount_ml: 120
+    feedback:
+      success_led: [0, 255, 0]
+
+  6:
+    label: "Pee"
+    icon: "diaper_pee"
+    action: "baby_basics.log_diaper"
+    params:
+      type: "pee"
+    feedback:
+      success_led: [0, 255, 0]
+
+  7:
+    label: "Poop"
+    icon: "diaper_poop"
+    action: "baby_basics.log_diaper"
+    params:
+      type: "poop"
+    feedback:
+      success_led: [0, 255, 0]
+
+  8:
+    label: "Both"
+    icon: "diaper_both"
+    action: "baby_basics.log_diaper"
+    params:
+      type: "both"
+    feedback:
+      success_led: [0, 255, 0]
+
+  9:
+    label: "Sleep"
+    icon: "sleep"
+    action: "baby_basics.toggle_sleep"
+    params: {}
+    feedback:
+      success_led: [0, 255, 0]
+
+  10:
+    label: "Note"
+    icon: "note"
+    action: "baby_basics.log_note"
+    params:
+      content: "Quick note logged"
+    feedback:
+      success_led: [0, 255, 0]
+
+  # Home Assistant (Row 3)
+  11:
+    label: "Nursery Light"
+    icon: "light"
+    action: "home_assistant.toggle"
+    params:
+      entity_id: "light.nursery"
+
+  12:
+    label: "Night Light"
+    icon: "light"
+    action: "home_assistant.toggle"
+    params:
+      entity_id: "light.nightlight"
+
+  13:
+    label: "Fan"
+    icon: "fan"
+    action: "home_assistant.toggle"
+    params:
+      entity_id: "fan.nursery"
+
+  14:
+    label: "Sound Machine"
+    icon: "sound"
+    action: "home_assistant.toggle"
+    params:
+      entity_id: "media_player.sound_machine"
+
+  15:
+    label: "All Off"
+    icon: "scene_off"
+    action: "home_assistant.scene"
+    params:
+      entity_id: "scene.nursery_off"
+
+dashboard:
+  poll_interval_seconds: 60
+  show_clock: true

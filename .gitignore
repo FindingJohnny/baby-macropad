@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Config with secrets
+config/local.yaml
+
+# Generated icons cache
+config/icons/*.jpg
+
+# OS
+.DS_Store
+Thumbs.db
+
+# SQLite offline queue
+*.db
+*.db-journal
+*.db-wal
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/

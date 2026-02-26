@@ -30,13 +30,24 @@ DEFAULT_VID = 0x5548
 DEFAULT_PID = 0x1000
 
 # Raw HID heartbeat command from Bitfocus Companion protocol analysis.
-# CRT prefix + "CONNECT" payload, padded to M18 output report size (1025).
-# This is the firmware's expected keepalive — bypasses the SDK's C library
-# which doesn't recognize our VID/PID.
+# CRT prefix + "CONNECT" payload, written via hidraw.
+#
+# IMPORTANT: Linux hidraw strips the first byte as the HID report ID.
+# For devices without numbered reports, the first byte MUST be 0x00.
+# Without it, the CRT prefix gets garbled (0x43 stripped as "report #67").
+#
+# Companion builds: [0x00] + CRT_prefix + command, padded to packetSize+1.
+# Our VID 0x5548 (N1EN per official SDK ProductIDs.py) — try 512-byte
+# packet size first (matches HSV-293S-2 with same VID in Companion).
+_HID_REPORT_ID = b'\x00'
 _CRT_PREFIX = bytes([0x43, 0x52, 0x54, 0x00, 0x00])
 _CONNECT_PAYLOAD = bytes([0x43, 0x4F, 0x4E, 0x4E, 0x45, 0x43, 0x54])  # "CONNECT"
-_M18_OUTPUT_REPORT_SIZE = 1025
-_HEARTBEAT_PACKET = (_CRT_PREFIX + _CONNECT_PAYLOAD).ljust(_M18_OUTPUT_REPORT_SIZE, b'\x00')
+_PACKET_SIZE_512 = 512  # VID 0x5548 devices in Companion use 512
+_PACKET_SIZE_1024 = 1024  # M18V3 default
+# Try 512 first (matches our VID), fall back to 1024 if needed
+_HEARTBEAT_PACKET = (_HID_REPORT_ID + _CRT_PREFIX + _CONNECT_PAYLOAD).ljust(
+    _PACKET_SIZE_1024 + 1, b'\x00'
+)
 
 
 class DeviceError(Exception):

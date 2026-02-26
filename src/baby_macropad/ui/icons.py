@@ -25,7 +25,14 @@ SCREEN_H = 272
 COLS = 5
 ROWS = 3
 CELL_W = SCREEN_W // COLS  # 96
-CELL_H = SCREEN_H // ROWS  # 90
+
+# Physical key cutout positions (y-offsets for each row).
+# The M18's physical buttons don't align with naive SCREEN_H/3 rows.
+# Empirically tuned: each row needs a slight downward shift because
+# the button bezels overlap the top of each cell's visible area.
+# Row heights: distribute 272px as 91 + 91 + 90
+ROW_Y = [0, 91, 182]
+ROW_H = [91, 91, 90]
 
 BG_COLOR = (28, 28, 30)  # Near-black, matches iOS bbBackground dark
 
@@ -175,7 +182,8 @@ def render_key_grid(buttons: dict[int, Any]) -> Image.Image:
 
         col, row = pos
         x = col * CELL_W
-        y = row * CELL_H
+        y = ROW_Y[row]
+        cell_h = ROW_H[row]
 
         icon_name = button.icon if hasattr(button, "icon") else button.get("icon", "")
         label = button.label if hasattr(button, "label") else button.get("label", "?")
@@ -184,13 +192,13 @@ def render_key_grid(buttons: dict[int, Any]) -> Image.Image:
         # Draw subtle background card
         margin = 3
         draw.rounded_rectangle(
-            [x + margin, y + margin, x + CELL_W - margin, y + CELL_H - margin],
+            [x + margin, y + margin, x + CELL_W - margin, y + cell_h - margin],
             radius=6,
             fill=_darken(color, 0.12),
         )
 
         # Vertically center icon+label as a group within the cell
-        top_offset = (CELL_H - content_height) // 2
+        top_offset = (cell_h - content_height) // 2
 
         # Try to load and draw the Tabler icon
         asset_name = ICON_ASSETS.get(icon_name)

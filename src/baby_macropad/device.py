@@ -82,6 +82,33 @@ class StreamDockDevice:
                 "Found %d HID interface(s), using %s",
                 len(found), found[0]["path"],
             )
+
+            # Warm-up cycle: the M18 firmware requires an initial
+            # open/init/change_mode/close before button events work.
+            # The first session primes the device; the second receives events.
+            warmup_transport = LibUSBHIDAPI()
+            warmup_device = StreamDockM18(warmup_transport, found[0])
+            warmup_device.open()
+            warmup_device.init()
+            warmup_transport.change_mode(1)
+            logger.info("Warm-up cycle: init + change_mode(1) sent")
+            import time
+            time.sleep(0.5)
+            try:
+                warmup_device.run_read_thread = False
+                warmup_transport.close()
+            except Exception:
+                pass
+            time.sleep(1)
+            logger.info("Warm-up cycle complete, reopening device")
+
+            # Re-enumerate after warm-up (transport handle is now closed)
+            transport = LibUSBHIDAPI()
+            found = transport.enumerate_devices(self._vid, self._pid)
+            if not found:
+                logger.warning("Device not found after warm-up cycle")
+                return False
+
             self._transport = transport
             self._device = StreamDockM18(transport, found[0])
             self._device.open()

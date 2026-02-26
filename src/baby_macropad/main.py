@@ -94,15 +94,16 @@ class MacropadController:
         )
         self._poll_thread.start()
 
-        # Start device keepalive (prevents firmware idle/demo mode)
-        self._keepalive_thread = threading.Thread(
-            target=self._keepalive_loop,
-            daemon=True,
-            name="device-keepalive",
-        )
-        self._keepalive_thread.start()
+        # NOTE: keepalive disabled for diagnostic test — checking if
+        # the firmware USB-disconnects on its own without any writes
+        # self._keepalive_thread = threading.Thread(
+        #     target=self._keepalive_loop,
+        #     daemon=True,
+        #     name="device-keepalive",
+        # )
+        # self._keepalive_thread.start()
 
-        logger.info("Macropad controller running")
+        logger.info("Macropad controller running (keepalive DISABLED for test)")
 
     def stop(self) -> None:
         """Clean shutdown."""

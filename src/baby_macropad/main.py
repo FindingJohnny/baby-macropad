@@ -182,12 +182,12 @@ class MacropadController:
                 self._refresh_dashboard()
 
     def _flash_led(self, r: int, g: int, b: int, duration: float = 0.5) -> None:
-        """Flash the LED ring, then return to idle color."""
+        """Flash the LED ring, then return to off."""
         def _flash():
+            self._device.set_led_brightness(50)
             self._device.set_led_color(r, g, b)
             time.sleep(duration)
-            ir, ig, ib = self.config.device.led_idle_color
-            self._device.set_led_color(ir, ig, ib)
+            self._device.turn_off_leds()
 
         threading.Thread(target=_flash, daemon=True).start()
 

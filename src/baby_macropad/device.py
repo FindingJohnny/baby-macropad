@@ -17,6 +17,7 @@ Hardware notes (VSD Inside / HOTSPOTEKUSB Stream Dock M18):
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -180,29 +181,42 @@ class StreamDockDevice:
             except (AttributeError, Exception):
                 pass
 
-    def keepalive(self, brightness: int = 80) -> None:
-        """Reassert device state to prevent firmware idle timeout.
+    def reinit(self) -> bool:
+        """Close and fully reopen the device from scratch.
 
-        The M18 firmware reverts to demo mode (display toggle + rainbow
-        LEDs) after ~2 minutes of no USB traffic. We call the same
-        transport-level commands that init() uses — wakeScreen() and
-        refresh() — to reset the firmware's idle timer, then reassert
-        our desired brightness and LED state.
+        The HOTSPOTEKUSB M18 firmware drops the USB connection after
+        ~90s of idle and comes back in demo mode. Rather than trying
+        to detect disconnects (the Python SDK swallows HID write errors),
+        we proactively re-init every 60s to stay ahead of the timeout.
 
-        NOTE: The SDK's heartbeat() C binding causes "device disconnected"
-        errors on the HOTSPOTEKUSB variant — do NOT use it.
+        Returns True if reinitialization succeeded.
         """
-        if not self._device:
-            return
-        try:
-            self._device.wakeScreen()
-            self._device.set_brightness(brightness)
-            self._device.set_led_brightness(0)
-            self._device.set_led_color(0, 0, 0)
-            self._device.refresh()
-            logger.info("Keepalive sent")
-        except Exception:
-            logger.warning("Keepalive failed", exc_info=True)
+        logger.info("Reinitializing device...")
+
+        # Close stale handles (silently — device may already be gone)
+        if self._device:
+            try:
+                self._device.close()
+            except Exception:
+                pass
+        self._device = None
+        self._transport = None
+        self._connected = False
+
+        # Brief pause for USB to settle
+        time.sleep(0.5)
+
+        # Re-open from scratch (enumerate + open + init)
+        if not self.open():
+            logger.warning("Reinit failed — device not found")
+            return False
+
+        # Re-register key callback (the new device object needs it)
+        if self._key_callback:
+            self.start_listening()
+
+        logger.info("Device reinitialized successfully")
+        return True
 
     def set_key_callback(self, callback: KeyCallback) -> None:
         """Register a callback for key press/release events."""
@@ -274,8 +288,8 @@ class StubDevice:
     def turn_off_leds(self) -> None:
         logger.debug("Stub: LEDs turned off (no-op)")
 
-    def keepalive(self) -> None:
-        logger.debug("Stub: keepalive (no-op)")
+    def reinit(self) -> bool:
+        return True
 
     def start_listening(self) -> None:
         logger.info("Stub: key listener started (no-op)")

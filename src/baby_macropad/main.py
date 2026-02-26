@@ -94,13 +94,13 @@ class MacropadController:
         )
         self._poll_thread.start()
 
-        # Start device keepalive loop (prevents firmware idle timeout)
-        self._keepalive_thread = threading.Thread(
-            target=self._keepalive_loop,
+        # Start device watchdog (detects USB disconnect, auto-reconnects)
+        self._watchdog_thread = threading.Thread(
+            target=self._watchdog_loop,
             daemon=True,
-            name="device-keepalive",
+            name="device-watchdog",
         )
-        self._keepalive_thread.start()
+        self._watchdog_thread.start()
 
         logger.info("Macropad controller running")
 
@@ -188,30 +188,32 @@ class MacropadController:
             if not self._shutdown.is_set():
                 self._refresh_dashboard()
 
-    def _keepalive_loop(self) -> None:
-        """Periodically reassert device state to prevent firmware idle timeout.
+    def _watchdog_loop(self) -> None:
+        """Proactively reinit device to prevent firmware idle timeout.
 
-        The M18 firmware reverts to demo mode (button=display-toggle,
-        LED=rainbow) after ~2 min of no USB traffic. We send lightweight
-        USB commands every 30s. Screen image re-sent every 4th cycle
-        (~2 min) to recover if firmware did reset.
+        The HOTSPOTEKUSB M18 firmware drops USB connection after ~90s
+        and comes back in demo mode. The Python SDK swallows HID write
+        errors, so we can't reliably detect the disconnect. Instead,
+        we proactively close and reopen the device every 60s — well
+        within the ~90s firmware timeout.
+
+        After reinit, we restore our full state (brightness, screen
+        image, LED off, key callback).
         """
-        cycle = 0
         while not self._shutdown.is_set():
-            self._shutdown.wait(30)
+            self._shutdown.wait(60)  # Reinit every 60s (before ~90s timeout)
             if self._shutdown.is_set():
                 break
-            cycle += 1
-            try:
-                self._device.keepalive(brightness=self.config.device.brightness)
-                # Re-send screen image every 4th cycle (~2 min) as recovery
-                if cycle % 4 == 0 and self._screen_jpeg:
+
+            if self._device.reinit():
+                # Restore full state after reinit
+                self._device.set_brightness(self.config.device.brightness)
+                if self._screen_jpeg:
                     self._device.set_screen_image(self._screen_jpeg)
-                    logger.info("Keepalive + screen refresh (cycle %d)", cycle)
-                else:
-                    logger.info("Keepalive sent (cycle %d)", cycle)
-            except Exception:
-                logger.warning("Device keepalive failed", exc_info=True)
+                self._device.turn_off_leds()
+                logger.info("Watchdog reinit complete — device state restored")
+            else:
+                logger.warning("Watchdog reinit failed — will retry next cycle")
 
     def _flash_led(self, r: int, g: int, b: int, duration: float = 0.5) -> None:
         """Flash the LED ring, then return to off."""

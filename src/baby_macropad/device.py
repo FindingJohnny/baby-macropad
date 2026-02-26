@@ -4,27 +4,28 @@ Abstracts the StreamDock SDK so the rest of the app doesn't depend on it.
 Falls back to a stub when the SDK is not installed (development/testing).
 
 Hardware notes (VSD Inside / HOTSPOTEKUSB Stream Dock M18):
-- USB VID=0x5548, PID=0x1000 (NOT 0x6603 as some docs claim)
+- USB VID=0x5548, PID=0x1000 (HOTSPOTEKUSB variant)
+- Official SDK expects VID=0x6603, PID=0x1009 — we enumerate manually
 - Two HID interfaces: interface 0 = device control, interface 1 = keyboard
 - Only use interface 0 (first enumerated path)
-- SDK's DeviceManager creates duplicate entries — bypass it
-- SDK's open() starts a reader thread automatically — don't call whileread()
-- Native transport lib segfaults on close() — skip native cleanup
+- M18 uses StreamDockM18 class (NOT StreamDock293!)
+- M18 transport: setKeyImgDualDevice / setBackgroundImgDualDevice
+- M18 key images: 64x64 JPEG, no rotation
+- M18 touchscreen: 480x272 JPEG, no rotation
+- M18 report sizes: input=513, output=1025, feature=0
 - ARM64 lib selection bug in SDK: copies libtransport_arm64.so over libtransport.so
 """
 
 from __future__ import annotations
 
-import ctypes
-import io
 import logging
 import os
-import threading
-import time
+import random
+import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +43,8 @@ class DeviceError(Exception):
 class StreamDockDevice:
     """Wrapper around the StreamDock SDK device.
 
+    Uses StreamDockM18 class with direct transport enumeration.
     Bypasses DeviceManager to avoid dual-interface enumeration bugs.
-    Uses direct transport + StreamDock293 for reliable operation.
     """
 
     def __init__(self, vid: int = DEFAULT_VID, pid: int = DEFAULT_PID) -> None:
@@ -59,7 +60,7 @@ class StreamDockDevice:
         return self._connected
 
     def open(self) -> bool:
-        """Discover and open the first StreamDock device.
+        """Discover and open the first StreamDock M18 device.
 
         Uses direct transport enumeration (not DeviceManager) to avoid
         the dual-interface bug where both HID interfaces create separate
@@ -68,7 +69,7 @@ class StreamDockDevice:
         Returns True if a device was found and opened.
         """
         try:
-            from StreamDock.Devices.StreamDock293 import StreamDock293
+            from StreamDock.Devices.StreamDockM18 import StreamDockM18
             from StreamDock.Transport.LibUSBHIDAPI import LibUSBHIDAPI
         except ImportError:
             logger.warning("StreamDock SDK not installed — running in stub mode")
@@ -90,20 +91,15 @@ class StreamDockDevice:
                 len(found), found[0]["path"],
             )
             self._transport = transport
-            self._device = StreamDock293(transport, found[0])
+            self._device = StreamDockM18(transport, found[0])
             self._device.open()
 
-            # Cancel the SDK's auto screen-off timer (we manage this ourselves)
-            if hasattr(self._device, "screenlicent"):
-                self._device.screenlicent.cancel()
-
-            # Wake screen and refresh display
-            self._device.wakeScreen()
-            self._device.screen_On()
-            self._device.refresh()
+            # init() calls set_device() which sets report sizes (513, 1025, 0),
+            # then wakeScreen, set_brightness(100), clearAllIcon, refresh
+            self._device.init()
 
             self._connected = True
-            logger.info("StreamDock device opened on %s", found[0]["path"])
+            logger.info("StreamDock M18 opened on %s", found[0]["path"])
             return True
         except Exception:
             logger.exception("Failed to open StreamDock device")
@@ -112,29 +108,22 @@ class StreamDockDevice:
     def close(self) -> None:
         """Close the device connection.
 
-        Skips native transport close() to avoid segfault in the ARM64
-        transport library. For a systemd service this is fine — the
-        process exits and the OS cleans up the USB handle.
+        Uses the SDK's close() which stops the reader thread and
+        sends disconnect. If that segfaults, the OS cleans up on exit.
         """
         if self._device:
             try:
                 self._device.clearAllIcon()
             except Exception:
                 pass
-            # Cancel any timers
-            if hasattr(self._device, "screenlicent"):
-                try:
-                    self._device.screenlicent.cancel()
-                except Exception:
-                    pass
-            # Stop reader thread
-            if hasattr(self._device, "run_read_thread"):
-                self._device.run_read_thread = False
-            # Do NOT call self._device.close() — native lib segfaults
+            try:
+                self._device.close()
+            except Exception:
+                logger.debug("Native close() failed (expected on ARM64), ignoring")
             self._device = None
             self._transport = None
             self._connected = False
-            logger.info("StreamDock device released (skipped native close)")
+            logger.info("StreamDock device released")
 
     def set_brightness(self, level: int) -> None:
         if self._device:
@@ -143,43 +132,32 @@ class StreamDockDevice:
     def set_key_image(self, key: int, image_path: str | Path) -> None:
         """Set the icon on a specific key (1-15).
 
-        Loads the image, converts to 100x100 JPEG with 180° rotation
-        (required by the M18 hardware), and sends raw bytes via
-        set_key_imagedata for maximum compatibility.
+        M18 uses setKeyImgDualDevice via the native transport lib.
+        The SDK's set_key_image handles image conversion (64x64 JPEG)
+        and the hardware key mapping internally.
         """
         if not self._device:
             return
         try:
-            img = Image.open(str(image_path)).convert("RGB").resize((100, 100))
-            img = img.rotate(180)
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=90)
-            jpeg_bytes = buf.getvalue()
-            arr_type = ctypes.c_char * len(jpeg_bytes)
-            arr = arr_type(*jpeg_bytes)
-            result = self._device.set_key_imagedata(key, arr, 100, 100)
-            logger.info("Set key %d image (%d bytes) result=%s", key, len(jpeg_bytes), result)
+            path = str(image_path)
+            result = self._device.set_key_image(key, path)
+            logger.info("Set key %d image from %s, result=%s", key, path, result)
         except Exception:
             logger.exception("Failed to set key %d image from %s", key, image_path)
 
-    def set_key_image_bytes(self, key: int, jpeg_data: bytes) -> None:
-        """Set the icon on a specific key from raw JPEG bytes."""
+    def set_touchscreen_image(self, image_path: str | Path) -> None:
+        """Set the full touchscreen background image (480x272)."""
         if not self._device:
             return
-        arr_type = ctypes.c_char * len(jpeg_data)
-        arr = arr_type(*jpeg_data)
-        self._device.set_key_imagedata(key, arr, 100, 100)
-
-    def set_touchscreen_image(self, image_path: str | Path) -> None:
-        """Set the full touchscreen background image."""
-        if self._device:
-            try:
-                self._device.set_touchscreen_image(str(image_path))
-            except Exception:
-                logger.exception("Failed to set touchscreen image")
+        try:
+            path = str(image_path)
+            result = self._device.set_touchscreen_image(path)
+            logger.info("Set touchscreen image from %s, result=%s", path, result)
+        except Exception:
+            logger.exception("Failed to set touchscreen image")
 
     def set_led_color(self, r: int, g: int, b: int) -> None:
-        """Set the LED ring color (not supported on all models)."""
+        """Set the LED ring color (M18 has 24 RGB LEDs)."""
         if self._device:
             try:
                 self._device.set_led_color(r, g, b)
@@ -200,23 +178,26 @@ class StreamDockDevice:
     def start_listening(self) -> None:
         """Register the key callback with the SDK.
 
-        The SDK's open() already starts a reader thread via _setup_reader().
-        We do NOT start another whileread() thread — that would conflict.
-        Just register our callback and let the existing thread dispatch events.
+        The new SDK uses InputEvent-based callbacks. We bridge to our
+        simpler (key_number, is_pressed) callback format.
         """
         if not self._device:
             return
 
-        def _key_handler(device: Any, key: int, state: int) -> None:
-            is_pressed = state == 1
-            if self._key_callback:
-                try:
-                    self._key_callback(key, is_pressed)
-                except Exception:
-                    logger.exception("Error in key callback for key %d", key)
+        def _key_handler(device: Any, event: Any) -> None:
+            """Bridge SDK InputEvent to our KeyCallback format."""
+            try:
+                from StreamDock.InputTypes import EventType
+                if event.event_type == EventType.BUTTON:
+                    key_num = int(event.key)  # ButtonKey IntEnum → int
+                    is_pressed = event.state == 1
+                    if self._key_callback:
+                        self._key_callback(key_num, is_pressed)
+            except Exception:
+                logger.exception("Error in key event handler")
 
         self._device.set_key_callback(_key_handler)
-        logger.info("Key event listener registered")
+        logger.info("Key event listener registered (M18 InputEvent mode)")
 
 
 class StubDevice:

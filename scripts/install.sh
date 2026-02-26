@@ -6,6 +6,8 @@ set -euo pipefail
 INSTALL_DIR="${INSTALL_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 VENV_DIR="${VENV_DIR:-/home/$USER/macropad-venv}"
 SERVICE_NAME="baby-macropad"
+SDK_REPO="https://github.com/MiraboxSpace/StreamDock-Device-SDK.git"
+SDK_CLONE_DIR="/tmp/StreamDock-Device-SDK"
 
 echo "=== Baby Basics Macropad Installer ==="
 echo "Install dir: $INSTALL_DIR"
@@ -19,17 +21,17 @@ sudo apt update -qq
 sudo apt install -y python3-full python3-pip python3-venv \
     libhidapi-libusb0 libhidapi-dev git fonts-dejavu-core usbutils
 
-# udev rules for StreamDock USB access (both known vendor IDs)
+# udev rules for StreamDock USB access (all known vendor IDs)
 echo ""
 echo "Setting up udev rules..."
 cat <<'EOF' | sudo tee /etc/udev/rules.d/99-streamdock.rules
-# VSD Inside / HOTSPOTEKUSB Stream Dock M18
+# VSD Inside / HOTSPOTEKUSB Stream Dock M18 (our hardware)
 SUBSYSTEM=="usb", ATTRS{idVendor}=="5548", MODE="0666", GROUP="plugdev"
 KERNEL=="hidraw*", ATTRS{idVendor}=="5548", MODE="0660", GROUP="plugdev"
-# StreamDock (alternate vendor ID)
+# Mirabox StreamDock (official vendor ID)
 SUBSYSTEM=="usb", ATTRS{idVendor}=="6603", MODE="0666", GROUP="plugdev"
 KERNEL=="hidraw*", ATTRS{idVendor}=="6603", MODE="0660", GROUP="plugdev"
-# StreamDock (SDK default vendor ID)
+# StreamDock (legacy vendor ID)
 SUBSYSTEM=="usb", ATTRS{idVendor}=="5500", MODE="0666", GROUP="plugdev"
 KERNEL=="hidraw*", ATTRS{idVendor}=="5500", MODE="0660", GROUP="plugdev"
 EOF
@@ -44,75 +46,67 @@ python3 -m venv "$VENV_DIR"
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip -q
-pip install -e "$INSTALL_DIR"
-pip install streamdock
 
-# Patch StreamDock SDK for ARM64 + M18 device
+# Install baby-macropad package (editable)
+pip install -e "$INSTALL_DIR"
+
+# Clone official StreamDock SDK from GitHub (pip package is outdated, missing M18)
 echo ""
-echo "Patching StreamDock SDK for ARM64 and M18 device..."
+echo "Installing StreamDock SDK from GitHub (official, with M18 support)..."
+rm -rf "$SDK_CLONE_DIR"
+git clone --depth 1 "$SDK_REPO" "$SDK_CLONE_DIR"
+
+# Install the Python SDK
+PYTHON_SDK_DIR="$SDK_CLONE_DIR/Python-SDK"
+if [ -d "$PYTHON_SDK_DIR" ]; then
+    pip install "$PYTHON_SDK_DIR"
+    echo "  Installed StreamDock SDK from GitHub"
+else
+    echo "  ERROR: Python-SDK directory not found in cloned repo!"
+    exit 1
+fi
+
+# Patch StreamDock SDK for ARM64
+echo ""
+echo "Patching StreamDock SDK for ARM64..."
 SITE_PACKAGES="$VENV_DIR/lib/python$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')/site-packages"
 SDK_DIR="$SITE_PACKAGES/StreamDock"
 
 if [ -d "$SDK_DIR" ]; then
     # Fix ARM64 library selection bug: SDK checks platform.system() for 'arm'
     # but it returns 'Linux' on ARM Linux. Copy the arm64 lib over the default.
-    if [ "$(uname -m)" = "aarch64" ] && [ -f "$SDK_DIR/Transport/libtransport_arm64.so" ]; then
-        cp "$SDK_DIR/Transport/libtransport_arm64.so" "$SDK_DIR/Transport/libtransport.so"
-        echo "  Patched: ARM64 transport library"
+    TRANSPORT_DLL_DIR="$SDK_DIR/Transport/TransportDLL"
+    if [ "$(uname -m)" = "aarch64" ]; then
+        # Look for ARM64 .so in TransportDLL
+        if [ -f "$TRANSPORT_DLL_DIR/libtransport_arm64.so" ]; then
+            cp "$TRANSPORT_DLL_DIR/libtransport_arm64.so" "$TRANSPORT_DLL_DIR/libtransport.so"
+            echo "  Patched: ARM64 transport library (TransportDLL/)"
+        elif [ -f "$SDK_DIR/Transport/libtransport_arm64.so" ]; then
+            cp "$SDK_DIR/Transport/libtransport_arm64.so" "$SDK_DIR/Transport/libtransport.so"
+            echo "  Patched: ARM64 transport library (Transport/)"
+        else
+            echo "  Warning: No ARM64 transport library found to patch"
+        fi
     fi
 
-    # Add M18 device (VID=0x5548 PID=0x1000) to ProductIDs
-    cat > "$SDK_DIR/ProductIDs.py" << 'PYEOF'
-class USBVendorIDs:
-    USB_VID = 0x5500
-    USB_VID_HOTSPOTEKUSB = 0x5548
+    # Add our HOTSPOTEKUSB VID/PID (0x5548:0x1000) to ProductIDs
+    # The official SDK only has 0x6603:0x1009 for M18
+    PRODUCT_IDS_FILE="$SDK_DIR/ProductIDs.py"
+    if [ -f "$PRODUCT_IDS_FILE" ]; then
+        if ! grep -q "0x5548" "$PRODUCT_IDS_FILE"; then
+            echo ""
+            echo "  Note: Our device VID 0x5548 not in ProductIDs.py"
+            echo "  We enumerate manually in device.py, so this is OK."
+        fi
+    fi
 
-class USBProductIDs:
-    USB_PID_STREAMDOCK_ORIGINAL = 0x0060
-    USB_PID_STREAMDOCK_ORIGINAL_V2 = 0x006d
-    USB_PID_STREAMDOCK_MINI = 0x0063
-    USB_PID_STREAMDOCK_XL = 0x006c
-    USB_PID_STREAMDOCK_XL_V2 = 0x008f
-    USB_PID_STREAMDOCK_MK2 = 0x0080
-    USB_PID_STREAMDOCK_PEDAL = 0x0086
-    USB_PID_STREAMDOCK_MINI_MK2 = 0x0090
-    USB_PID_STREAMDOCK_PLUS = 0x0084
-    USB_PID_STREAMDOCK_293 = 0x1001
-    USB_PID_STREAMDOCK_M18 = 0x1000
-PYEOF
-    echo "  Patched: ProductIDs with M18 device"
-
-    # Update DeviceManager to enumerate M18 devices
-    cat > "$SDK_DIR/DeviceManager.py" << 'PYEOF'
-from .Devices.StreamDock293 import StreamDock293
-from .ProductIDs import USBVendorIDs, USBProductIDs
-from .Transport.LibUSBHIDAPI import LibUSBHIDAPI
-
-class DeviceManager:
-    streamdocks = list()
-
-    @staticmethod
-    def _get_transport(transport):
-        return LibUSBHIDAPI()
-
-    def __init__(self, transport=None):
-        self.transport = self._get_transport(transport)
-
-    def enumerate(self):
-        products = [
-            (USBVendorIDs.USB_VID, USBProductIDs.USB_PID_STREAMDOCK_293, StreamDock293),
-            (USBVendorIDs.USB_VID_HOTSPOTEKUSB, USBProductIDs.USB_PID_STREAMDOCK_M18, StreamDock293),
-        ]
-        for vid, pid, class_type in products:
-            found_devices = self.transport.enumerate(vid=vid, pid=pid)
-            self.streamdocks.extend([class_type(self.transport, d) for d in found_devices])
-        return self.streamdocks
-PYEOF
-    echo "  Patched: DeviceManager with M18 enumeration"
     echo "StreamDock SDK patching complete."
 else
     echo "  Warning: StreamDock SDK not found at $SDK_DIR — device may not work"
 fi
+
+# Clean up SDK clone
+rm -rf "$SDK_CLONE_DIR"
 
 # systemd service
 echo ""

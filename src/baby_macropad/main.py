@@ -15,8 +15,7 @@ from baby_macropad.config import MacropadConfig, load_config
 from baby_macropad.device import StreamDockDevice, StubDevice
 from baby_macropad.offline.queue import OfflineQueue
 from baby_macropad.offline.sync import SyncWorker
-from baby_macropad.ui.dashboard import save_dashboard
-from baby_macropad.ui.icons import generate_all_icons
+from baby_macropad.ui.icons import get_key_grid_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +65,10 @@ class MacropadController:
         # Set brightness
         self._device.set_brightness(self.config.device.brightness)
 
-        # Generate and set button icons
-        icon_dir = CACHE_DIR / "icons"
-        icon_paths = generate_all_icons(self.config.buttons, icon_dir)
-        for key_num, path in icon_paths.items():
-            self._device.set_key_image(key_num, path)
+        # Render and send the key grid (all keys as one 480x272 image)
+        key_grid_jpeg = get_key_grid_bytes(self.config.buttons)
+        self._device.set_screen_image(key_grid_jpeg)
+        logger.info("Key grid sent to display (%d bytes)", len(key_grid_jpeg))
 
         # Set idle LED color
         r, g, b = self.config.device.led_idle_color
@@ -83,8 +81,8 @@ class MacropadController:
         # Start sync worker
         self.sync_worker.start()
 
-        # Initial dashboard fetch
-        self._refresh_dashboard()
+        # Initial dashboard fetch (runs in background, doesn't block startup)
+        threading.Thread(target=self._refresh_dashboard, daemon=True).start()
 
         # Start dashboard poll loop
         self._poll_thread = threading.Thread(
@@ -163,27 +161,14 @@ class MacropadController:
             raise ValueError(f"Unknown action: {action}")
 
     def _refresh_dashboard(self) -> None:
-        """Fetch dashboard data and update the touchscreen."""
+        """Fetch dashboard data and log status."""
         try:
             self._dashboard = self.api_client.get_dashboard()
             self._connected = True
-            self._update_touchscreen()
+            logger.info("Dashboard refreshed")
         except Exception as e:
             logger.warning("Dashboard refresh failed: %s", e)
             self._connected = False
-            self._update_touchscreen()
-
-    def _update_touchscreen(self) -> None:
-        """Re-render and push the dashboard image to the device."""
-        dash_data = self._dashboard.raw if self._dashboard else None
-        dash_path = CACHE_DIR / "dashboard.jpg"
-        save_dashboard(
-            output_path=dash_path,
-            dashboard_data=dash_data,
-            connected=self._connected,
-            queued_count=self.queue.count(),
-        )
-        self._device.set_touchscreen_image(dash_path)
 
     def _dashboard_poll_loop(self) -> None:
         """Poll the dashboard API at the configured interval."""

@@ -1,23 +1,27 @@
-"""Stream Dock M18 device wrapper.
+"""Stream Dock M18 device wrapper — raw hidraw driver.
 
-Abstracts the StreamDock SDK so the rest of the app doesn't depend on it.
-Falls back to a stub when the SDK is not installed (development/testing).
+Bypasses the MiraboxSpace SDK's C library (libtransport.so) for all HID I/O
+except image transmission. The C library's reader thread causes firmware USB
+disconnects after ~60s. Using raw hidraw directly keeps the device stable
+indefinitely (verified 70+ minutes with zero disconnects).
 
-Hardware notes (VSD Inside / HOTSPOTEKUSB Stream Dock M18):
-- USB VID=0x5548, PID=0x1000 (HOTSPOTEKUSB variant)
-- 15 screen keys are one 480x272 LCD panel (5 cols x 3 rows)
-- Individual set_key_image_stream doesn't work on this variant
-- Must compose all keys into one 480x272 image and send via
-  set_background_image_stream (the only working image method)
-- 3 additional physical (non-display) buttons in row 4
-- M18 report sizes: input=513, output=1025, feature=0
-- ARM64 lib selection bug in SDK: copy libtransport_arm64.so over libtransport.so
+Protocol from Bitfocus Companion (streamdock.ts):
+  - All writes: [0x00 report_id] + CRT_prefix + payload, padded to PACKET_SIZE+1
+  - CRT prefix: [0x43, 0x52, 0x54, 0x00, 0x00]
+  - Button events: data[9]=key_code, data[10]=state (0x01=press, 0x02=release)
+
+Hardware: VSD Inside / HOTSPOTEKUSB Stream Dock (VID=0x5548, PID=0x1000)
+  - PID 0x1000 = StreamDock N1EN per official SDK ProductIDs.py
+  - 15 screen keys (one 480x272 LCD panel), 3 physical buttons, 24 RGB LEDs
 """
 
 from __future__ import annotations
 
+import glob
 import logging
 import os
+import select
+import threading
 from pathlib import Path
 from typing import Any, Callable
 
@@ -25,29 +29,50 @@ logger = logging.getLogger(__name__)
 
 KeyCallback = Callable[[int, bool], None]  # (key_number, is_pressed)
 
-# HOTSPOTEKUSB Stream Dock M18
+# HOTSPOTEKUSB Stream Dock
 DEFAULT_VID = 0x5548
 DEFAULT_PID = 0x1000
 
-# Raw HID heartbeat command from Bitfocus Companion protocol analysis.
-# CRT prefix + "CONNECT" payload, written via hidraw.
-#
-# IMPORTANT: Linux hidraw strips the first byte as the HID report ID.
-# For devices without numbered reports, the first byte MUST be 0x00.
-# Without it, the CRT prefix gets garbled (0x43 stripped as "report #67").
-#
-# Companion builds: [0x00] + CRT_prefix + command, padded to packetSize+1.
-# Our VID 0x5548 (N1EN per official SDK ProductIDs.py) — try 512-byte
-# packet size first (matches HSV-293S-2 with same VID in Companion).
-_HID_REPORT_ID = b'\x00'
+# CRT protocol constants (from Bitfocus Companion streamdock.ts)
+_PACKET_SIZE = 1024
 _CRT_PREFIX = bytes([0x43, 0x52, 0x54, 0x00, 0x00])
-_CONNECT_PAYLOAD = bytes([0x43, 0x4F, 0x4E, 0x4E, 0x45, 0x43, 0x54])  # "CONNECT"
-_PACKET_SIZE_512 = 512  # VID 0x5548 devices in Companion use 512
-_PACKET_SIZE_1024 = 1024  # M18V3 default
-# Try 512 first (matches our VID), fall back to 1024 if needed
-_HEARTBEAT_PACKET = (_HID_REPORT_ID + _CRT_PREFIX + _CONNECT_PAYLOAD).ljust(
-    _PACKET_SIZE_1024 + 1, b'\x00'
-)
+_CMD_CONNECT = bytes([0x43, 0x4F, 0x4E, 0x4E, 0x45, 0x43, 0x54])  # "CONNECT"
+_CMD_WAKE = bytes([0x44, 0x49, 0x53])  # "DIS"
+_CMD_REFRESH = bytes([0x53, 0x54, 0x50])  # "STP"
+
+
+def _build_cmd(payload: bytes) -> bytes:
+    """Build a CRT command packet for hidraw write.
+
+    Format: [0x00 report_id] + CRT_prefix + payload, zero-padded to PACKET_SIZE+1.
+    Linux hidraw strips the first byte as HID report ID — the 0x00 prefix is mandatory.
+    """
+    return (b'\x00' + _CRT_PREFIX + payload).ljust(_PACKET_SIZE + 1, b'\x00')
+
+
+# Pre-built packets for performance
+_HEARTBEAT_PACKET = _build_cmd(_CMD_CONNECT)
+_WAKE_PACKET = _build_cmd(_CMD_WAKE)
+_REFRESH_PACKET = _build_cmd(_CMD_REFRESH)
+
+
+def _find_hidraw(vid: int, pid: int) -> str | None:
+    """Find the hidraw device path for a given VID/PID via sysfs."""
+    vid_hex = f"{vid:08X}"
+    pid_hex = f"{pid:08X}"
+    target_id = f"0003:{vid_hex}:{pid_hex}"
+
+    for hidraw_dir in sorted(glob.glob("/sys/class/hidraw/hidraw*/device")):
+        uevent_path = os.path.join(hidraw_dir, "uevent")
+        try:
+            with open(uevent_path) as f:
+                for line in f:
+                    if line.startswith("HID_ID=") and target_id in line.upper():
+                        devname = os.path.basename(os.path.dirname(hidraw_dir))
+                        return f"/dev/{devname}"
+        except OSError:
+            continue
+    return None
 
 
 class DeviceError(Exception):
@@ -55,148 +80,160 @@ class DeviceError(Exception):
 
 
 class StreamDockDevice:
-    """Wrapper around the StreamDock SDK device.
+    """Stream Dock driver using raw hidraw for HID I/O.
 
-    Uses StreamDockM18 class with direct transport enumeration.
-    All display updates go through set_screen_image() which sends
-    a full 480x272 composite to the LCD panel.
+    Uses the SDK transport only for image sending (complex chunked protocol).
+    All other I/O (heartbeat, button reads, brightness, LED) goes through
+    raw hidraw to avoid the SDK's C library reader thread which causes
+    firmware USB disconnects.
     """
 
     def __init__(self, vid: int = DEFAULT_VID, pid: int = DEFAULT_PID) -> None:
         self._vid = vid
         self._pid = pid
-        self._device: Any = None
-        self._transport: Any = None
+        self._transport: Any = None  # SDK transport (for images only)
         self._key_callback: KeyCallback | None = None
         self._connected = False
-        self._hidraw_path: str | None = None  # For raw heartbeat writes
-        self._hidraw_fd: int | None = None
+        self._hidraw_path: str | None = None
+        self._hidraw_fd: int | None = None  # Read+write fd for all raw HID I/O
+        self._reader_thread: threading.Thread | None = None
+        self._reader_stop = threading.Event()
 
     @property
     def connected(self) -> bool:
         return self._connected
 
     def open(self) -> bool:
-        """Discover and open the first StreamDock M18 device.
+        """Discover and open the device.
 
-        Uses the official DeviceManager pattern: enumerate with a bare
-        transport, then create a dedicated LibUSBHIDAPI(device_info) per
-        device so the C library gets full HID metadata (VID, PID,
-        usage_page, etc.) when creating the transport handle.
+        1. Finds the hidraw device via sysfs
+        2. Opens it for read+write (all HID I/O)
+        3. Optionally sets up SDK transport for image sending only
+        4. Sends init sequence (wake, brightness)
 
         Returns True if a device was found and opened.
         """
-        try:
-            from StreamDock.Devices.StreamDockM18 import StreamDockM18
-            from StreamDock.Transport.LibUSBHIDAPI import LibUSBHIDAPI
-        except ImportError:
-            logger.warning("StreamDock SDK not installed — running in stub mode")
+        # Find device via sysfs
+        self._hidraw_path = _find_hidraw(self._vid, self._pid)
+        if not self._hidraw_path:
+            logger.warning(
+                "No StreamDock device found (VID=%04x PID=%04x)", self._vid, self._pid
+            )
             return False
 
         try:
-            # Enumerate with a bare transport (same as DeviceManager)
-            enum_transport = LibUSBHIDAPI()
-            found = enum_transport.enumerate_devices(self._vid, self._pid)
-            if not found:
-                logger.warning(
-                    "No StreamDock devices found (VID=%04x PID=%04x)",
-                    self._vid, self._pid,
-                )
-                return False
+            # Open hidraw for read+write
+            self._hidraw_fd = os.open(self._hidraw_path, os.O_RDWR)
+            logger.info("Opened %s (fd=%d)", self._hidraw_path, self._hidraw_fd)
 
-            device_dict = found[0]
-            logger.info(
-                "Found %d HID interface(s), using %s",
-                len(found), device_dict["path"],
-            )
+            # Send init sequence via raw hidraw
+            self._raw_write(_WAKE_PACKET)
+            logger.info("Wake screen sent")
 
-            # Create a dedicated transport with full device info
-            # (matches DeviceManager.enumerate() pattern exactly)
-            device_info = LibUSBHIDAPI.create_device_info_from_dict(device_dict)
-            device_transport = LibUSBHIDAPI(device_info)
+            self._raw_write(_HEARTBEAT_PACKET)
+            logger.info("Initial CONNECT heartbeat sent")
 
-            self._transport = device_transport
-            self._device = StreamDockM18(device_transport, device_dict)
-            self._device.open()
-            self._device.init()
-
-            # PID 0x1000 = StreamDock N1EN per official SDK ProductIDs.py.
-            # The N1 class calls switchMode(2) after open — the M18 does NOT.
-            # Without this, the N1EN firmware may stay in demo mode and
-            # USB-disconnect after ~60s. We use M18 class for the key layout
-            # but add the N1's mode switch command.
-            try:
-                self._transport.switchMode(2)
-                logger.info("Mode switch (2) sent — N1EN firmware compatibility")
-            except Exception:
-                logger.debug("switchMode(2) not supported or failed (non-critical)")
+            # Try to set up SDK transport for image sending (optional)
+            self._setup_image_transport()
 
             self._connected = True
-            self._hidraw_path = device_dict["path"]
-
-            # Open a separate fd for raw heartbeat writes (bypasses C library)
-            try:
-                self._hidraw_fd = os.open(self._hidraw_path, os.O_WRONLY)
-                logger.info("Heartbeat fd opened on %s", self._hidraw_path)
-            except OSError:
-                logger.warning("Could not open hidraw for heartbeat: %s", self._hidraw_path)
-                self._hidraw_fd = None
-
-            logger.info("StreamDock M18 opened on %s", self._hidraw_path)
+            logger.info("StreamDock opened on %s", self._hidraw_path)
             return True
         except Exception:
             logger.exception("Failed to open StreamDock device")
+            self._cleanup_fd()
             return False
 
-    def close(self) -> None:
-        """Close the device connection."""
+    def _setup_image_transport(self) -> None:
+        """Set up the SDK transport for image sending only.
+
+        We create the transport and open it, but do NOT create a StreamDockM18
+        device object (which would start the problematic C library reader thread).
+        """
+        try:
+            from StreamDock.Transport.LibUSBHIDAPI import LibUSBHIDAPI
+        except ImportError:
+            logger.info("StreamDock SDK not installed — image sending unavailable")
+            return
+
+        try:
+            # Enumerate to get device info needed for transport
+            enum_transport = LibUSBHIDAPI()
+            found = enum_transport.enumerate_devices(self._vid, self._pid)
+            if not found:
+                logger.warning("SDK enumeration found no devices (image transport unavailable)")
+                return
+
+            device_dict = found[0]
+            device_info = LibUSBHIDAPI.create_device_info_from_dict(device_dict)
+            transport = LibUSBHIDAPI(device_info)
+
+            # Open the transport (for image writes)
+            transport.open(bytes(device_dict["path"], "utf-8"))
+            # Set M18/N1 report sizes
+            transport.set_report_size(513, 1025, 0)
+
+            self._transport = transport
+            logger.info("SDK image transport ready")
+        except Exception:
+            logger.warning("Failed to set up SDK image transport (images will be unavailable)")
+            self._transport = None
+
+    def _raw_write(self, data: bytes) -> None:
+        """Write raw data to hidraw."""
+        if self._hidraw_fd is not None:
+            os.write(self._hidraw_fd, data)
+
+    def _cleanup_fd(self) -> None:
+        """Close the hidraw file descriptor."""
         if self._hidraw_fd is not None:
             try:
                 os.close(self._hidraw_fd)
             except OSError:
                 pass
             self._hidraw_fd = None
-        if self._device:
+
+    def close(self) -> None:
+        """Clean shutdown."""
+        # Stop reader thread
+        self._reader_stop.set()
+        if self._reader_thread and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=2.0)
+
+        # Close SDK transport (for images)
+        if self._transport:
             try:
-                self._device.clearAllIcon()
+                self._transport.close()
             except Exception:
                 pass
-            try:
-                self._device.close()
-            except Exception:
-                logger.debug("Native close() failed (expected on ARM64), ignoring")
-            self._device = None
             self._transport = None
-            self._connected = False
-            logger.info("StreamDock device released")
 
-    def turn_off_leds(self) -> None:
-        """Turn off the LED ring completely.
+        # Close hidraw fd
+        self._cleanup_fd()
 
-        NOTE: Do NOT call reset_led_effect() — it restores the firmware's
-        default color cycling animation. Instead, set brightness to 0 and
-        color to black to suppress the LEDs.
-        """
-        if self._device:
-            try:
-                self._device.set_led_brightness(0)
-                self._device.set_led_color(0, 0, 0)
-                logger.info("LED ring turned off")
-            except Exception:
-                pass
+        self._connected = False
+        logger.info("StreamDock device released")
 
     def set_brightness(self, level: int) -> None:
-        if self._device:
-            self._device.set_brightness(level)
+        """Set screen brightness (0-100) via CRT+LIG command."""
+        clamped = max(0, min(100, level))
+        # Apply gamma curve (matches Companion's setBrightness)
+        y = pow(clamped / 100, 0.75)
+        brightness = round(y * 100)
+        try:
+            self._raw_write(_build_cmd(bytes([0x4C, 0x49, 0x47, 0x00, 0x00, brightness])))
+        except OSError as e:
+            logger.warning("Failed to set brightness: %s", e)
 
     def set_screen_image(self, jpeg_data: bytes) -> None:
         """Send a full 480x272 JPEG image to the LCD panel.
 
-        This is the only working image method on the HOTSPOTEKUSB M18
-        variant. The entire 15-key grid is one LCD, so we send one
-        composite image containing all key icons.
+        Uses the SDK transport's set_background_image_stream (complex chunked
+        protocol handled by the C library). Falls back gracefully if the
+        transport isn't available.
         """
         if not self._transport:
+            logger.debug("No image transport — skipping screen image")
             return
         try:
             self._transport.set_background_image_stream(jpeg_data)
@@ -206,45 +243,49 @@ class StreamDockDevice:
 
     def set_screen_image_file(self, image_path: str | Path) -> None:
         """Send a 480x272 JPEG file to the LCD panel."""
-        if not self._transport:
-            return
         try:
             with open(str(image_path), "rb") as f:
-                jpeg_data = f.read()
-            self.set_screen_image(jpeg_data)
+                self.set_screen_image(f.read())
         except Exception:
             logger.exception("Failed to send screen image from %s", image_path)
 
     def set_led_color(self, r: int, g: int, b: int) -> None:
-        """Set the LED ring color (M18 has 24 RGB LEDs)."""
-        if self._device:
+        """Set the LED ring color via SDK transport."""
+        if self._transport:
             try:
-                self._device.set_led_color(r, g, b)
-            except (AttributeError, Exception):
+                self._transport.set_led_color(24, r, g, b)
+            except Exception:
                 pass
 
     def set_led_brightness(self, level: int) -> None:
-        if self._device:
+        """Set LED ring brightness via SDK transport."""
+        if self._transport:
             try:
-                self._device.set_led_brightness(level)
-            except (AttributeError, Exception):
+                self._transport.set_led_brightness(level)
+            except Exception:
                 pass
 
+    def turn_off_leds(self) -> None:
+        """Turn off the LED ring.
+
+        Set brightness to 0 and color to black. Do NOT call reset_led_effect()
+        which restores the firmware's default color cycling animation.
+        """
+        self.set_led_brightness(0)
+        self.set_led_color(0, 0, 0)
+        logger.info("LED ring turned off")
+
     def send_heartbeat(self) -> bool:
-        """Send the raw CONNECT heartbeat to prevent firmware idle timeout.
+        """Send CRT+CONNECT heartbeat to prevent firmware idle timeout.
 
-        The firmware expects a periodic CRT+"CONNECT" HID report to stay
-        in active mode. Without it, it reverts to demo mode after ~100s.
-
-        We write directly to the hidraw device node, bypassing the SDK's
-        C library which doesn't recognize our VID/PID (0x5548:0x1000).
-        This is the same heartbeat Bitfocus Companion sends.
+        The firmware reverts to demo mode without periodic CONNECT commands.
+        Written directly to hidraw (bypasses SDK C library).
         """
         if self._hidraw_fd is None:
             return False
         try:
             os.write(self._hidraw_fd, _HEARTBEAT_PACKET)
-            logger.info("Heartbeat CONNECT sent via hidraw")
+            logger.debug("Heartbeat CONNECT sent")
             return True
         except OSError as e:
             logger.warning("Heartbeat write failed: %s", e)
@@ -255,28 +296,46 @@ class StreamDockDevice:
         self._key_callback = callback
 
     def start_listening(self) -> None:
-        """Register the key callback with the SDK.
+        """Start reading button events from hidraw in a background thread.
 
-        The SDK uses InputEvent-based callbacks. We bridge to our
-        simpler (key_number, is_pressed) callback format.
+        Reads HID reports directly from /dev/hidraw (no SDK C library).
+        Button events are at data[9]=key_code, data[10]=state.
         """
-        if not self._device:
+        if self._hidraw_fd is None:
             return
 
-        def _key_handler(device: Any, event: Any) -> None:
-            """Bridge SDK InputEvent to our KeyCallback format."""
-            try:
-                from StreamDock.InputTypes import EventType
-                if event.event_type == EventType.BUTTON:
-                    key_num = int(event.key)  # ButtonKey IntEnum -> int
-                    is_pressed = event.state == 1
-                    if self._key_callback:
-                        self._key_callback(key_num, is_pressed)
-            except Exception:
-                logger.exception("Error in key event handler")
+        self._reader_stop.clear()
+        self._reader_thread = threading.Thread(
+            target=self._reader_loop,
+            daemon=True,
+            name="hidraw-reader",
+        )
+        self._reader_thread.start()
+        logger.info("Key event listener started (raw hidraw mode)")
 
-        self._device.set_key_callback(_key_handler)
-        logger.info("Key event listener registered (M18 InputEvent mode)")
+    def _reader_loop(self) -> None:
+        """Background thread: read button events from hidraw."""
+        while not self._reader_stop.is_set():
+            try:
+                # Poll with 100ms timeout to check stop flag
+                readable, _, _ = select.select([self._hidraw_fd], [], [], 0.1)
+                if not readable:
+                    continue
+
+                data = os.read(self._hidraw_fd, 1024)
+                if len(data) >= 11 and self._key_callback:
+                    key_code = data[9]
+                    state = data[10]
+                    if key_code != 0xFF:  # 0xFF = write confirmation, skip
+                        is_pressed = state == 0x01
+                        self._key_callback(key_code, is_pressed)
+            except OSError as e:
+                if not self._reader_stop.is_set():
+                    logger.warning("hidraw read error: %s", e)
+                break
+            except Exception:
+                if not self._reader_stop.is_set():
+                    logger.exception("Error in hidraw reader")
 
 
 class StubDevice:

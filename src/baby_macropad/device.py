@@ -87,6 +87,18 @@ class StreamDockDevice:
             self._device.open()
             self._device.init()
 
+            # Switch to mode 1 to enable HID button event reporting.
+            # Without this, button presses toggle the display internally
+            # instead of being reported to the host.
+            self._transport.change_mode(1)
+
+            # Turn off the LED ring (init may re-enable it)
+            try:
+                self._device.set_led_color(0, 0, 0)
+                self._device.set_led_brightness(0)
+            except Exception:
+                pass
+
             self._connected = True
             logger.info("StreamDock M18 opened on %s", found[0]["path"])
             return True

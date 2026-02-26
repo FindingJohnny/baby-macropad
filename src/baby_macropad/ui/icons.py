@@ -95,11 +95,27 @@ def _get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 
 def _key_position(key_num: int) -> tuple[int, int] | None:
-    """Key number (1-15) to grid (col, row). Row-major: 1-5 top, 11-15 bottom."""
+    """Key number (1-15) to grid (col, row).
+
+    M18 physical-to-key mapping (verified by testing):
+      Top row:    KEY_11  KEY_12  KEY_13  KEY_14  KEY_15
+      Middle row: KEY_6   KEY_7   KEY_8   KEY_9   KEY_10
+      Bottom row: KEY_1   KEY_2   KEY_3   KEY_4   KEY_5
+
+    Top and bottom rows are swapped vs naive numbering.
+    """
     if key_num < 1 or key_num > 15:
         return None
-    idx = key_num - 1
-    return (idx % COLS, idx // COLS)
+    # Map key number to physical grid position
+    if 1 <= key_num <= 5:
+        # Keys 1-5 are on the BOTTOM row (row 2)
+        return (key_num - 1, 2)
+    elif 6 <= key_num <= 10:
+        # Keys 6-10 are in the MIDDLE row (row 1)
+        return (key_num - 6, 1)
+    else:
+        # Keys 11-15 are on the TOP row (row 0)
+        return (key_num - 11, 0)
 
 
 def _darken(color: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
@@ -176,9 +192,9 @@ def render_key_grid(buttons: dict[int, Any]) -> Image.Image:
         if asset_name:
             tinted = _load_and_tint(asset_name, color, icon_size)
             if tinted:
-                # Center icon in upper portion of cell
+                # Center icon in upper 2/3 of cell
                 ix = x + (CELL_W - icon_size) // 2
-                iy = y + (CELL_H - icon_size) // 2 - 8
+                iy = y + (CELL_H - icon_size) // 2 - 10
                 screen.paste(tinted, (ix, iy), tinted)  # Use alpha mask
                 icon_drawn = True
 
@@ -188,7 +204,7 @@ def render_key_grid(buttons: dict[int, Any]) -> Image.Image:
             bbox = draw.textbbox((0, 0), text, font=fallback_font)
             tw = bbox[2] - bbox[0]
             tx = x + (CELL_W - tw) // 2
-            ty = y + (CELL_H - 20) // 2 - 8
+            ty = y + (CELL_H - 20) // 2 - 10
             draw.text((tx, ty), text, fill=color, font=fallback_font)
 
         # Draw label below icon
@@ -196,7 +212,7 @@ def render_key_grid(buttons: dict[int, Any]) -> Image.Image:
         bbox = draw.textbbox((0, 0), display_label, font=label_font)
         lw = bbox[2] - bbox[0]
         lx = x + (CELL_W - lw) // 2
-        ly = y + CELL_H - 18
+        ly = y + CELL_H - 16
         draw.text((lx, ly), display_label, fill=color, font=label_font)
 
     return screen

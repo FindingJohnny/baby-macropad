@@ -184,8 +184,10 @@ class StreamDockDevice:
         """Reassert device state to prevent firmware idle timeout.
 
         The M18 firmware reverts to demo mode (display toggle + rainbow
-        LEDs) after ~2 minutes of no USB traffic. We re-send known-good
-        commands (brightness + LED off) to keep the firmware in our mode.
+        LEDs) after ~2 minutes of no USB traffic. We call the same
+        transport-level commands that init() uses — wakeScreen() and
+        refresh() — to reset the firmware's idle timer, then reassert
+        our desired brightness and LED state.
 
         NOTE: The SDK's heartbeat() C binding causes "device disconnected"
         errors on the HOTSPOTEKUSB variant — do NOT use it.
@@ -193,9 +195,11 @@ class StreamDockDevice:
         if not self._device:
             return
         try:
+            self._device.wakeScreen()
             self._device.set_brightness(brightness)
             self._device.set_led_brightness(0)
             self._device.set_led_color(0, 0, 0)
+            self._device.refresh()
             logger.info("Keepalive sent")
         except Exception:
             logger.warning("Keepalive failed", exc_info=True)

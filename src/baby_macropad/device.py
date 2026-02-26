@@ -59,6 +59,11 @@ class StreamDockDevice:
     def open(self) -> bool:
         """Discover and open the first StreamDock M18 device.
 
+        Uses the official DeviceManager pattern: enumerate with a bare
+        transport, then create a dedicated LibUSBHIDAPI(device_info) per
+        device so the C library gets full HID metadata (VID, PID,
+        usage_page, etc.) when creating the transport handle.
+
         Returns True if a device was found and opened.
         """
         try:
@@ -69,8 +74,9 @@ class StreamDockDevice:
             return False
 
         try:
-            transport = LibUSBHIDAPI()
-            found = transport.enumerate_devices(self._vid, self._pid)
+            # Enumerate with a bare transport (same as DeviceManager)
+            enum_transport = LibUSBHIDAPI()
+            found = enum_transport.enumerate_devices(self._vid, self._pid)
             if not found:
                 logger.warning(
                     "No StreamDock devices found (VID=%04x PID=%04x)",
@@ -78,44 +84,24 @@ class StreamDockDevice:
                 )
                 return False
 
+            device_dict = found[0]
             logger.info(
                 "Found %d HID interface(s), using %s",
-                len(found), found[0]["path"],
+                len(found), device_dict["path"],
             )
 
-            # Warm-up cycle: the M18 firmware requires an initial
-            # open/init/change_mode/close before button events work.
-            # The first session primes the device; the second receives events.
-            warmup_transport = LibUSBHIDAPI()
-            warmup_device = StreamDockM18(warmup_transport, found[0])
-            warmup_device.open()
-            warmup_device.init()
-            warmup_transport.change_mode(1)
-            logger.info("Warm-up cycle: init + change_mode(1) sent")
-            import time
-            time.sleep(0.5)
-            try:
-                warmup_device.run_read_thread = False
-                warmup_transport.close()
-            except Exception:
-                pass
-            time.sleep(1)
-            logger.info("Warm-up cycle complete, reopening device")
+            # Create a dedicated transport with full device info
+            # (matches DeviceManager.enumerate() pattern exactly)
+            device_info = LibUSBHIDAPI.create_device_info_from_dict(device_dict)
+            device_transport = LibUSBHIDAPI(device_info)
 
-            # Re-enumerate after warm-up (transport handle is now closed)
-            transport = LibUSBHIDAPI()
-            found = transport.enumerate_devices(self._vid, self._pid)
-            if not found:
-                logger.warning("Device not found after warm-up cycle")
-                return False
-
-            self._transport = transport
-            self._device = StreamDockM18(transport, found[0])
+            self._transport = device_transport
+            self._device = StreamDockM18(device_transport, device_dict)
             self._device.open()
             self._device.init()
 
             self._connected = True
-            logger.info("StreamDock M18 opened on %s", found[0]["path"])
+            logger.info("StreamDock M18 opened on %s", device_dict["path"])
             return True
         except Exception:
             logger.exception("Failed to open StreamDock device")
@@ -136,17 +122,6 @@ class StreamDockDevice:
             self._transport = None
             self._connected = False
             logger.info("StreamDock device released")
-
-    def enable_button_events(self) -> None:
-        """Switch to mode 1 to enable HID button event reporting.
-
-        MUST be called AFTER set_screen_image(). Calling it before
-        other transport commands (brightness, background image) can
-        cause it to be silently reset by the firmware.
-        """
-        if self._transport:
-            self._transport.change_mode(1)
-            logger.info("Switched to mode 1 (button events enabled)")
 
     def turn_off_leds(self) -> None:
         """Turn off the LED ring completely."""
@@ -269,9 +244,6 @@ class StubDevice:
 
     def set_key_callback(self, callback: KeyCallback) -> None:
         self._key_callback = callback
-
-    def enable_button_events(self) -> None:
-        logger.debug("Stub: button events enabled (no-op)")
 
     def turn_off_leds(self) -> None:
         logger.debug("Stub: LEDs turned off (no-op)")

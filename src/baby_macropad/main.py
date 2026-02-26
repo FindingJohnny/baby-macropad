@@ -70,10 +70,6 @@ class MacropadController:
         self._device.set_screen_image(key_grid_jpeg)
         logger.info("Key grid sent to display (%d bytes)", len(key_grid_jpeg))
 
-        # Enable button events AFTER screen image is sent.
-        # Firmware resets mode if called before other transport commands.
-        self._device.enable_button_events()
-
         # Turn off LED ring
         self._device.turn_off_leds()
 

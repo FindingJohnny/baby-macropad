@@ -49,6 +49,9 @@ class MacropadController:
         self._dashboard: DashboardData | None = None
         self._connected = False
 
+        # Cached display state for keepalive
+        self._screen_jpeg: bytes | None = None
+
         # Device (try real, fall back to stub)
         self._device = StreamDockDevice()
 
@@ -66,9 +69,9 @@ class MacropadController:
         self._device.set_brightness(self.config.device.brightness)
 
         # Render and send the key grid (all keys as one 480x272 image)
-        key_grid_jpeg = get_key_grid_bytes(self.config.buttons)
-        self._device.set_screen_image(key_grid_jpeg)
-        logger.info("Key grid sent to display (%d bytes)", len(key_grid_jpeg))
+        self._screen_jpeg = get_key_grid_bytes(self.config.buttons)
+        self._device.set_screen_image(self._screen_jpeg)
+        logger.info("Key grid sent to display (%d bytes)", len(self._screen_jpeg))
 
         # Turn off LED ring
         self._device.turn_off_leds()
@@ -90,6 +93,14 @@ class MacropadController:
             name="dashboard-poll",
         )
         self._poll_thread.start()
+
+        # Start device keepalive loop (prevents firmware idle timeout)
+        self._keepalive_thread = threading.Thread(
+            target=self._keepalive_loop,
+            daemon=True,
+            name="device-keepalive",
+        )
+        self._keepalive_thread.start()
 
         logger.info("Macropad controller running")
 
@@ -176,6 +187,24 @@ class MacropadController:
             self._shutdown.wait(interval)
             if not self._shutdown.is_set():
                 self._refresh_dashboard()
+
+    def _keepalive_loop(self) -> None:
+        """Periodically reassert device state to prevent firmware idle timeout.
+
+        The M18 firmware reverts to demo mode (button=display-toggle,
+        LED=rainbow) after ~2 min of no USB traffic. We send a heartbeat
+        and re-send the screen image every 30s to keep it in our mode.
+        """
+        while not self._shutdown.is_set():
+            self._shutdown.wait(30)
+            if self._shutdown.is_set():
+                break
+            try:
+                self._device.keepalive()
+                if self._screen_jpeg:
+                    self._device.set_screen_image(self._screen_jpeg)
+            except Exception:
+                logger.warning("Device keepalive failed", exc_info=True)
 
     def _flash_led(self, r: int, g: int, b: int, duration: float = 0.5) -> None:
         """Flash the LED ring, then return to off."""

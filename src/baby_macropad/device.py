@@ -16,12 +16,9 @@ Hardware notes (VSD Inside / HOTSPOTEKUSB Stream Dock M18):
 
 from __future__ import annotations
 
-import io
 import logging
 from pathlib import Path
 from typing import Any, Callable
-
-from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +180,24 @@ class StreamDockDevice:
             except (AttributeError, Exception):
                 pass
 
+    def keepalive(self) -> None:
+        """Send a heartbeat to prevent firmware idle timeout.
+
+        The M18 firmware reverts to demo mode (display toggle + rainbow
+        LEDs) after ~2 minutes of no USB traffic. The SDK provides a
+        heartbeat() C binding specifically for this. We also reassert
+        LED-off state since the firmware restores rainbow cycling on idle.
+        """
+        if not self._transport:
+            return
+        try:
+            self._transport.heartbeat()
+            self._device.set_led_brightness(0)
+            self._device.set_led_color(0, 0, 0)
+            logger.debug("Keepalive sent")
+        except Exception:
+            logger.warning("Keepalive failed", exc_info=True)
+
     def set_key_callback(self, callback: KeyCallback) -> None:
         """Register a callback for key press/release events."""
         self._key_callback = callback
@@ -252,6 +267,9 @@ class StubDevice:
 
     def turn_off_leds(self) -> None:
         logger.debug("Stub: LEDs turned off (no-op)")
+
+    def keepalive(self) -> None:
+        logger.debug("Stub: keepalive (no-op)")
 
     def start_listening(self) -> None:
         logger.info("Stub: key listener started (no-op)")

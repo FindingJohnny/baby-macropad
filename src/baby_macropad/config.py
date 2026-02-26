@@ -36,7 +36,7 @@ def _resolve_env_recursive(data: Any) -> Any:
 
 class DeviceConfig(BaseModel):
     brightness: int = Field(default=80, ge=0, le=100)
-    led_idle_color: tuple[int, int, int] = (30, 0, 60)
+    led_idle_color: tuple[int, int, int] = (0, 0, 0)
 
     @field_validator("led_idle_color", mode="before")
     @classmethod

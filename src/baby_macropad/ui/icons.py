@@ -1,9 +1,8 @@
 """Button icon rendering for the M18 full-screen LCD.
 
-The M18's 15 screen keys are one 480x272 LCD panel. Individual key image
-commands don't work on our hardware variant (VID 0x5548). Instead, we
-compose all key icons into a single 480x272 background image and send
-it via set_background_image_stream.
+The M18's 15 screen keys are one 480x272 LCD panel. We compose all key
+icons into a single 480x272 background image using the same Tabler icons
+from the iOS app, tinted with category colors.
 
 Grid layout: 5 columns x 3 rows = 15 keys.
 Each cell: 96x90 pixels.
@@ -30,7 +29,10 @@ CELL_H = SCREEN_H // ROWS  # 90
 
 BG_COLOR = (28, 28, 30)  # Near-black, matches iOS bbBackground dark
 
-# Category colors from the UX design doc
+# Icon asset directory (relative to package root)
+_ASSETS_DIR = Path(__file__).parent.parent.parent.parent / "assets" / "icons"
+
+# Category colors (same as iOS design system)
 ICON_COLORS = {
     "breast_left": (102, 204, 102),   # Soft green
     "breast_right": (102, 204, 102),
@@ -46,28 +48,42 @@ ICON_COLORS = {
     "scene_off": (255, 255, 255),     # White
 }
 
-# Short text labels for each icon
+# Map icon names to PNG asset files (same Tabler icons as iOS app)
+ICON_ASSETS = {
+    "breast_left": "bottle",
+    "breast_right": "bottle",
+    "bottle": "bottle",
+    "diaper_pee": "diaper",
+    "diaper_poop": "poo",
+    "diaper_both": "diaper",
+    "sleep": "moon",
+    "note": "note",
+}
+
+# Labels shown below the icon
 ICON_LABELS = {
-    "breast_left": "L",
-    "breast_right": "R",
-    "bottle": "BTL",
+    "breast_left": "LEFT",
+    "breast_right": "RIGHT",
+    "bottle": "BOTTLE",
     "diaper_pee": "PEE",
-    "diaper_poop": "POO",
-    "diaper_both": "P+P",
-    "sleep": "ZZZ",
+    "diaper_poop": "POOP",
+    "diaper_both": "BOTH",
+    "sleep": "SLEEP",
     "note": "NOTE",
-    "light": "LGT",
+    "light": "LIGHT",
     "fan": "FAN",
-    "sound": "SND",
+    "sound": "SOUND",
     "scene_off": "OFF",
 }
 
+# Cache loaded + tinted icons
+_icon_cache: dict[str, Image.Image] = {}
+
 
 def _get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    """Try to load DejaVu Sans Bold, fall back to default."""
     font_paths = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",  # Linux
-        "/System/Library/Fonts/Helvetica.ttc",                     # macOS
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
     ]
     for path in font_paths:
         if Path(path).exists():
@@ -79,33 +95,59 @@ def _get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 
 def _key_position(key_num: int) -> tuple[int, int] | None:
-    """Convert key number (1-15) to grid position (col, row).
-
-    Key layout on M18 (5x3 grid):
-      Row 0:  1  2  3  4  5
-      Row 1:  6  7  8  9 10
-      Row 2: 11 12 13 14 15
-    """
+    """Key number (1-15) to grid (col, row). Row-major: 1-5 top, 11-15 bottom."""
     if key_num < 1 or key_num > 15:
         return None
     idx = key_num - 1
-    col = idx % COLS
-    row = idx // COLS
-    return (col, row)
+    return (idx % COLS, idx // COLS)
+
+
+def _darken(color: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
+    return (int(color[0] * factor), int(color[1] * factor), int(color[2] * factor))
+
+
+def _load_and_tint(asset_name: str, color: tuple[int, int, int], size: int) -> Image.Image | None:
+    """Load a white PNG icon, tint it with the given color, and resize."""
+    cache_key = f"{asset_name}_{color}_{size}"
+    if cache_key in _icon_cache:
+        return _icon_cache[cache_key]
+
+    png_path = _ASSETS_DIR / f"{asset_name}.png"
+    if not png_path.exists():
+        logger.warning("Icon asset not found: %s", png_path)
+        return None
+
+    # Load white icon with alpha
+    icon = Image.open(png_path).convert("RGBA")
+    icon = icon.resize((size, size), Image.LANCZOS)
+
+    # Tint: multiply white pixels by color, preserving alpha
+    r, g, b = color
+    pixels = icon.load()
+    for y in range(icon.height):
+        for x in range(icon.width):
+            pr, pg, pb, pa = pixels[x, y]
+            if pa > 0:
+                # Scale the white pixel by the target color
+                pixels[x, y] = (
+                    pr * r // 255,
+                    pg * g // 255,
+                    pb * b // 255,
+                    pa,
+                )
+
+    _icon_cache[cache_key] = icon
+    return icon
 
 
 def render_key_grid(buttons: dict[int, Any]) -> Image.Image:
-    """Render all button icons as a single 480x272 composite image.
-
-    Args:
-        buttons: Dict mapping key number (1-15) to ButtonConfig objects
-
-    Returns:
-        PIL Image (480x272, RGB) ready for set_background_image_stream
-    """
+    """Render all button icons as a single 480x272 composite image."""
     screen = Image.new("RGB", (SCREEN_W, SCREEN_H), BG_COLOR)
     draw = ImageDraw.Draw(screen)
-    font = _get_font(22)
+    label_font = _get_font(11)
+    fallback_font = _get_font(20)
+
+    icon_size = 40  # Icon render size in pixels
 
     for key_num, button in buttons.items():
         pos = _key_position(key_num)
@@ -118,31 +160,46 @@ def render_key_grid(buttons: dict[int, Any]) -> Image.Image:
 
         icon_name = button.icon if hasattr(button, "icon") else button.get("icon", "")
         label = button.label if hasattr(button, "label") else button.get("label", "?")
-
         color = ICON_COLORS.get(icon_name, (200, 200, 200))
-        text = ICON_LABELS.get(icon_name, label[:4])
 
-        # Draw colored rounded-ish rectangle with margin
-        margin = 4
-        draw.rectangle(
+        # Draw subtle background card
+        margin = 3
+        draw.rounded_rectangle(
             [x + margin, y + margin, x + CELL_W - margin, y + CELL_H - margin],
-            fill=_darken(color, 0.3),
+            radius=6,
+            fill=_darken(color, 0.12),
         )
 
-        # Draw text centered in cell
-        bbox = draw.textbbox((0, 0), text, font=font)
-        tw = bbox[2] - bbox[0]
-        th = bbox[3] - bbox[1]
-        tx = x + (CELL_W - tw) // 2
-        ty = y + (CELL_H - th) // 2
-        draw.text((tx, ty), text, fill=color, font=font)
+        # Try to load and draw the Tabler icon
+        asset_name = ICON_ASSETS.get(icon_name)
+        icon_drawn = False
+        if asset_name:
+            tinted = _load_and_tint(asset_name, color, icon_size)
+            if tinted:
+                # Center icon in upper portion of cell
+                ix = x + (CELL_W - icon_size) // 2
+                iy = y + (CELL_H - icon_size) // 2 - 8
+                screen.paste(tinted, (ix, iy), tinted)  # Use alpha mask
+                icon_drawn = True
+
+        if not icon_drawn:
+            # Fallback: draw text
+            text = label[:4].upper()
+            bbox = draw.textbbox((0, 0), text, font=fallback_font)
+            tw = bbox[2] - bbox[0]
+            tx = x + (CELL_W - tw) // 2
+            ty = y + (CELL_H - 20) // 2 - 8
+            draw.text((tx, ty), text, fill=color, font=fallback_font)
+
+        # Draw label below icon
+        display_label = ICON_LABELS.get(icon_name, label[:6].upper())
+        bbox = draw.textbbox((0, 0), display_label, font=label_font)
+        lw = bbox[2] - bbox[0]
+        lx = x + (CELL_W - lw) // 2
+        ly = y + CELL_H - 18
+        draw.text((lx, ly), display_label, fill=color, font=label_font)
 
     return screen
-
-
-def _darken(color: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
-    """Darken an RGB color by a factor (0=black, 1=original)."""
-    return (int(color[0] * factor), int(color[1] * factor), int(color[2] * factor))
 
 
 def save_key_grid(buttons: dict[int, Any], output_path: Path) -> Path:

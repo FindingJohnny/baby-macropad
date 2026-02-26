@@ -97,6 +97,11 @@ class StreamDockDevice:
             if hasattr(self._device, "screenlicent"):
                 self._device.screenlicent.cancel()
 
+            # Wake screen and refresh display
+            self._device.wakeScreen()
+            self._device.screen_On()
+            self._device.refresh()
+
             self._connected = True
             logger.info("StreamDock device opened on %s", found[0]["path"])
             return True
@@ -152,7 +157,8 @@ class StreamDockDevice:
             jpeg_bytes = buf.getvalue()
             arr_type = ctypes.c_char * len(jpeg_bytes)
             arr = arr_type(*jpeg_bytes)
-            self._device.set_key_imagedata(key, arr, 100, 100)
+            result = self._device.set_key_imagedata(key, arr, 100, 100)
+            logger.info("Set key %d image (%d bytes) result=%s", key, len(jpeg_bytes), result)
         except Exception:
             logger.exception("Failed to set key %d image from %s", key, image_path)
 

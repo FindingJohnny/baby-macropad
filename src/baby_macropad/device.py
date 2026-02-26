@@ -17,7 +17,6 @@ Hardware notes (VSD Inside / HOTSPOTEKUSB Stream Dock M18):
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -181,42 +180,27 @@ class StreamDockDevice:
             except (AttributeError, Exception):
                 pass
 
-    def reinit(self) -> bool:
-        """Close and fully reopen the device from scratch.
+    def keepalive(self, screen_jpeg: bytes | None = None) -> None:
+        """Re-send display image and LED state to prevent firmware idle.
 
-        The HOTSPOTEKUSB M18 firmware drops the USB connection after
-        ~90s of idle and comes back in demo mode. Rather than trying
-        to detect disconnects (the Python SDK swallows HID write errors),
-        we proactively re-init every 60s to stay ahead of the timeout.
+        The HOTSPOTEKUSB M18 firmware reverts to demo mode after ~2 min
+        of no display writes. The firmware does NOT USB-disconnect on
+        its own — it just switches modes. Periodic screen image sends
+        keep it in active mode (matching how official SDK examples work).
 
-        Returns True if reinitialization succeeded.
+        NOTE: Do NOT call close()/reopen — that CAUSES USB disconnects.
+        NOTE: Do NOT call heartbeat() — causes errors on this VID/PID.
         """
-        logger.info("Reinitializing device...")
-
-        # Close stale handles (silently — device may already be gone)
-        if self._device:
-            try:
-                self._device.close()
-            except Exception:
-                pass
-        self._device = None
-        self._transport = None
-        self._connected = False
-
-        # Brief pause for USB to settle
-        time.sleep(0.5)
-
-        # Re-open from scratch (enumerate + open + init)
-        if not self.open():
-            logger.warning("Reinit failed — device not found")
-            return False
-
-        # Re-register key callback (the new device object needs it)
-        if self._key_callback:
-            self.start_listening()
-
-        logger.info("Device reinitialized successfully")
-        return True
+        if not self._transport:
+            return
+        try:
+            if screen_jpeg:
+                self._transport.set_background_image_stream(screen_jpeg)
+            self._device.set_led_brightness(0)
+            self._device.set_led_color(0, 0, 0)
+            logger.info("Keepalive: screen + LEDs refreshed")
+        except Exception:
+            logger.warning("Keepalive failed", exc_info=True)
 
     def set_key_callback(self, callback: KeyCallback) -> None:
         """Register a callback for key press/release events."""
@@ -288,8 +272,8 @@ class StubDevice:
     def turn_off_leds(self) -> None:
         logger.debug("Stub: LEDs turned off (no-op)")
 
-    def reinit(self) -> bool:
-        return True
+    def keepalive(self, screen_jpeg: bytes | None = None) -> None:
+        logger.debug("Stub: keepalive (no-op)")
 
     def start_listening(self) -> None:
         logger.info("Stub: key listener started (no-op)")

@@ -106,14 +106,18 @@ class StreamDockDevice:
     def open(self) -> bool:
         """Discover and open the device.
 
-        1. Finds the hidraw device via sysfs
-        2. Opens it for read+write (all HID I/O)
-        3. Optionally sets up SDK transport for image sending only
-        4. Sends init sequence (wake, brightness)
+        Order matters:
+        1. Set up SDK transport for image sending FIRST (needs exclusive access)
+        2. Find and open hidraw for read+write (heartbeat, buttons, commands)
+        3. Send init sequence (wake, heartbeat)
 
         Returns True if a device was found and opened.
         """
-        # Find device via sysfs
+        # Step 1: Set up SDK transport for image sending (must happen before
+        # we open hidraw, as the SDK's enumerate_devices needs access)
+        self._setup_image_transport()
+
+        # Step 2: Find device via sysfs
         self._hidraw_path = _find_hidraw(self._vid, self._pid)
         if not self._hidraw_path:
             logger.warning(
@@ -132,9 +136,6 @@ class StreamDockDevice:
 
             self._raw_write(_HEARTBEAT_PACKET)
             logger.info("Initial CONNECT heartbeat sent")
-
-            # Try to set up SDK transport for image sending (optional)
-            self._setup_image_transport()
 
             self._connected = True
             logger.info("StreamDock opened on %s", self._hidraw_path)

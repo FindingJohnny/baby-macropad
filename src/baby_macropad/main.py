@@ -192,18 +192,24 @@ class MacropadController:
         """Periodically reassert device state to prevent firmware idle timeout.
 
         The M18 firmware reverts to demo mode (button=display-toggle,
-        LED=rainbow) after ~2 min of no USB traffic. We send a heartbeat
-        and re-send the screen image every 30s to keep it in our mode.
+        LED=rainbow) after ~2 min of no USB traffic. We send lightweight
+        USB commands every 30s. Screen image re-sent every 4th cycle
+        (~2 min) to recover if firmware did reset.
         """
+        cycle = 0
         while not self._shutdown.is_set():
             self._shutdown.wait(30)
             if self._shutdown.is_set():
                 break
+            cycle += 1
             try:
                 self._device.keepalive(brightness=self.config.device.brightness)
-                if self._screen_jpeg:
+                # Re-send screen image every 4th cycle (~2 min) as recovery
+                if cycle % 4 == 0 and self._screen_jpeg:
                     self._device.set_screen_image(self._screen_jpeg)
-                logger.info("Device keepalive completed")
+                    logger.info("Keepalive + screen refresh (cycle %d)", cycle)
+                else:
+                    logger.info("Keepalive sent (cycle %d)", cycle)
             except Exception:
                 logger.warning("Device keepalive failed", exc_info=True)
 

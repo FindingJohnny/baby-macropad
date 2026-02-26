@@ -77,7 +77,7 @@ class StreamDockDevice:
 
         try:
             transport = LibUSBHIDAPI()
-            found = transport.enumerate(self._vid, self._pid)
+            found = transport.enumerate_devices(self._vid, self._pid)
             if not found:
                 logger.warning(
                     "No StreamDock devices found (VID=%04x PID=%04x)",

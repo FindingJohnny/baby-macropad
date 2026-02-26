@@ -5,7 +5,9 @@ icons into a single 480x272 background image using the same Tabler icons
 from the iOS app, tinted with category colors.
 
 Grid layout: 5 columns x 3 rows = 15 keys.
-Each cell: 96x90 pixels.
+Full cell: 96x~91 pixels, but physical button bezels obscure the edges.
+Visible area per button: ~72x60 pixels (measured via calibration patterns).
+Content is centered within the visible area, not the full cell.
 """
 
 from __future__ import annotations
@@ -26,13 +28,17 @@ COLS = 5
 ROWS = 3
 CELL_W = SCREEN_W // COLS  # 96
 
-# Physical key cutout positions (y-offsets for each row).
-# The M18's physical buttons don't align with naive SCREEN_H/3 rows.
-# Empirically tuned: each row needs a slight downward shift because
-# the button bezels overlap the top of each cell's visible area.
-# Row heights: distribute 272px as 91 + 91 + 90
-ROW_Y = [0, 91, 182]
-ROW_H = [91, 91, 90]
+# Visible area per button — measured via calibration patterns.
+# The physical bezels obscure ~12px on each side horizontally and
+# ~15-20px on each side vertically. These are the pixel rectangles
+# actually visible through the button cutouts.
+#
+# Columns (X ranges): C0=11-83, C1=107-179, C2=203-275, C3=299-371, C4=395-467
+# Rows (Y ranges):    R0=10-70,  R1=110-170, R2=200-270
+VIS_COL_X = [11, 107, 203, 299, 395]  # Left edge of visible area per column
+VIS_COL_W = [72, 72, 72, 72, 72]      # Visible width per column
+VIS_ROW_Y = [10, 110, 200]            # Top edge of visible area per row
+VIS_ROW_H = [60, 60, 70]              # Visible height per row
 
 BG_COLOR = (28, 28, 30)  # Near-black, matches iOS bbBackground dark
 
@@ -164,16 +170,22 @@ def _load_and_tint(asset_name: str, color: tuple[int, int, int], size: int) -> I
 
 
 def render_key_grid(buttons: dict[int, Any]) -> Image.Image:
-    """Render all button icons as a single 480x272 composite image."""
+    """Render all button icons as a single 480x272 composite image.
+
+    Content is centered within the measured visible area of each button,
+    not the full cell. The bezels hide ~12px per side horizontally and
+    ~15-20px per side vertically, so we render into the ~72x60px window
+    that's actually visible through each physical button cutout.
+    """
     screen = Image.new("RGB", (SCREEN_W, SCREEN_H), BG_COLOR)
     draw = ImageDraw.Draw(screen)
     label_font = _get_font(11)
-    fallback_font = _get_font(20)
+    fallback_font = _get_font(18)
 
-    icon_size = 40  # Icon render size in pixels
-    label_height = 13  # Approximate rendered height of 11pt label
-    icon_label_gap = 4  # Gap between icon and label
-    content_height = icon_size + icon_label_gap + label_height  # ~57px
+    icon_size = 36  # Sized to fit within 60px visible height with label
+    label_height = 13
+    icon_label_gap = 3
+    content_height = icon_size + icon_label_gap + label_height  # ~52px
 
     for key_num, button in buttons.items():
         pos = _key_position(key_num)
@@ -181,24 +193,27 @@ def render_key_grid(buttons: dict[int, Any]) -> Image.Image:
             continue
 
         col, row = pos
-        x = col * CELL_W
-        y = ROW_Y[row]
-        cell_h = ROW_H[row]
+
+        # Visible area for this button (measured via calibration)
+        vx = VIS_COL_X[col]
+        vy = VIS_ROW_Y[row]
+        vw = VIS_COL_W[col]
+        vh = VIS_ROW_H[row]
 
         icon_name = button.icon if hasattr(button, "icon") else button.get("icon", "")
         label = button.label if hasattr(button, "label") else button.get("label", "?")
         color = ICON_COLORS.get(icon_name, (200, 200, 200))
 
-        # Draw subtle background card
-        margin = 3
+        # Draw subtle background card filling the visible area
+        margin = 2
         draw.rounded_rectangle(
-            [x + margin, y + margin, x + CELL_W - margin, y + cell_h - margin],
-            radius=6,
+            [vx + margin, vy + margin, vx + vw - margin, vy + vh - margin],
+            radius=5,
             fill=_darken(color, 0.12),
         )
 
-        # Vertically center icon+label as a group within the cell
-        top_offset = (cell_h - content_height) // 2
+        # Vertically center icon+label as a group within the visible area
+        top_offset = (vh - content_height) // 2
 
         # Try to load and draw the Tabler icon
         asset_name = ICON_ASSETS.get(icon_name)
@@ -206,27 +221,27 @@ def render_key_grid(buttons: dict[int, Any]) -> Image.Image:
         if asset_name:
             tinted = _load_and_tint(asset_name, color, icon_size)
             if tinted:
-                ix = x + (CELL_W - icon_size) // 2
-                iy = y + top_offset
-                screen.paste(tinted, (ix, iy), tinted)  # Use alpha mask
+                ix = vx + (vw - icon_size) // 2
+                iy = vy + top_offset
+                screen.paste(tinted, (ix, iy), tinted)
                 icon_drawn = True
 
         if not icon_drawn:
-            # Fallback: draw text (centered in the icon area)
+            # Fallback: draw text centered in the icon area
             text = label[:4].upper()
             bbox = draw.textbbox((0, 0), text, font=fallback_font)
             tw = bbox[2] - bbox[0]
             th = bbox[3] - bbox[1]
-            tx = x + (CELL_W - tw) // 2
-            ty = y + top_offset + (icon_size - th) // 2
+            tx = vx + (vw - tw) // 2
+            ty = vy + top_offset + (icon_size - th) // 2
             draw.text((tx, ty), text, fill=color, font=fallback_font)
 
         # Draw label below icon
         display_label = ICON_LABELS.get(icon_name, label[:6].upper())
         bbox = draw.textbbox((0, 0), display_label, font=label_font)
         lw = bbox[2] - bbox[0]
-        lx = x + (CELL_W - lw) // 2
-        ly = y + top_offset + icon_size + icon_label_gap
+        lx = vx + (vw - lw) // 2
+        ly = vy + top_offset + icon_size + icon_label_gap
         draw.text((lx, ly), display_label, fill=color, font=label_font)
 
     return screen

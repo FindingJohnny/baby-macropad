@@ -17,6 +17,7 @@ Hardware notes (VSD Inside / HOTSPOTEKUSB Stream Dock M18):
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -27,6 +28,15 @@ KeyCallback = Callable[[int, bool], None]  # (key_number, is_pressed)
 # HOTSPOTEKUSB Stream Dock M18
 DEFAULT_VID = 0x5548
 DEFAULT_PID = 0x1000
+
+# Raw HID heartbeat command from Bitfocus Companion protocol analysis.
+# CRT prefix + "CONNECT" payload, padded to M18 output report size (1025).
+# This is the firmware's expected keepalive — bypasses the SDK's C library
+# which doesn't recognize our VID/PID.
+_CRT_PREFIX = bytes([0x43, 0x52, 0x54, 0x00, 0x00])
+_CONNECT_PAYLOAD = bytes([0x43, 0x4F, 0x4E, 0x4E, 0x45, 0x43, 0x54])  # "CONNECT"
+_M18_OUTPUT_REPORT_SIZE = 1025
+_HEARTBEAT_PACKET = (_CRT_PREFIX + _CONNECT_PAYLOAD).ljust(_M18_OUTPUT_REPORT_SIZE, b'\x00')
 
 
 class DeviceError(Exception):
@@ -48,6 +58,8 @@ class StreamDockDevice:
         self._transport: Any = None
         self._key_callback: KeyCallback | None = None
         self._connected = False
+        self._hidraw_path: str | None = None  # For raw heartbeat writes
+        self._hidraw_fd: int | None = None
 
     @property
     def connected(self) -> bool:
@@ -98,7 +110,17 @@ class StreamDockDevice:
             self._device.init()
 
             self._connected = True
-            logger.info("StreamDock M18 opened on %s", device_dict["path"])
+            self._hidraw_path = device_dict["path"]
+
+            # Open a separate fd for raw heartbeat writes (bypasses C library)
+            try:
+                self._hidraw_fd = os.open(self._hidraw_path, os.O_WRONLY)
+                logger.info("Heartbeat fd opened on %s", self._hidraw_path)
+            except OSError:
+                logger.warning("Could not open hidraw for heartbeat: %s", self._hidraw_path)
+                self._hidraw_fd = None
+
+            logger.info("StreamDock M18 opened on %s", self._hidraw_path)
             return True
         except Exception:
             logger.exception("Failed to open StreamDock device")
@@ -106,6 +128,12 @@ class StreamDockDevice:
 
     def close(self) -> None:
         """Close the device connection."""
+        if self._hidraw_fd is not None:
+            try:
+                os.close(self._hidraw_fd)
+            except OSError:
+                pass
+            self._hidraw_fd = None
         if self._device:
             try:
                 self._device.clearAllIcon()
@@ -180,27 +208,25 @@ class StreamDockDevice:
             except (AttributeError, Exception):
                 pass
 
-    def keepalive(self, screen_jpeg: bytes | None = None) -> None:
-        """Re-send display image and LED state to prevent firmware idle.
+    def send_heartbeat(self) -> bool:
+        """Send the raw CONNECT heartbeat to prevent firmware idle timeout.
 
-        The HOTSPOTEKUSB M18 firmware reverts to demo mode after ~2 min
-        of no display writes. The firmware does NOT USB-disconnect on
-        its own — it just switches modes. Periodic screen image sends
-        keep it in active mode (matching how official SDK examples work).
+        The firmware expects a periodic CRT+"CONNECT" HID report to stay
+        in active mode. Without it, it reverts to demo mode after ~100s.
 
-        NOTE: Do NOT call close()/reopen — that CAUSES USB disconnects.
-        NOTE: Do NOT call heartbeat() — causes errors on this VID/PID.
+        We write directly to the hidraw device node, bypassing the SDK's
+        C library which doesn't recognize our VID/PID (0x5548:0x1000).
+        This is the same heartbeat Bitfocus Companion sends.
         """
-        if not self._transport:
-            return
+        if self._hidraw_fd is None:
+            return False
         try:
-            if screen_jpeg:
-                self._transport.set_background_image_stream(screen_jpeg)
-            self._device.set_led_brightness(0)
-            self._device.set_led_color(0, 0, 0)
-            logger.info("Keepalive: screen + LEDs refreshed")
-        except Exception:
-            logger.warning("Keepalive failed", exc_info=True)
+            os.write(self._hidraw_fd, _HEARTBEAT_PACKET)
+            logger.info("Heartbeat CONNECT sent via hidraw")
+            return True
+        except OSError as e:
+            logger.warning("Heartbeat write failed: %s", e)
+            return False
 
     def set_key_callback(self, callback: KeyCallback) -> None:
         """Register a callback for key press/release events."""
@@ -272,8 +298,9 @@ class StubDevice:
     def turn_off_leds(self) -> None:
         logger.debug("Stub: LEDs turned off (no-op)")
 
-    def keepalive(self, screen_jpeg: bytes | None = None) -> None:
-        logger.debug("Stub: keepalive (no-op)")
+    def send_heartbeat(self) -> bool:
+        logger.debug("Stub: heartbeat (no-op)")
+        return True
 
     def start_listening(self) -> None:
         logger.info("Stub: key listener started (no-op)")

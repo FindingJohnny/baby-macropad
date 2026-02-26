@@ -94,16 +94,15 @@ class MacropadController:
         )
         self._poll_thread.start()
 
-        # NOTE: keepalive disabled for diagnostic test — checking if
-        # the firmware USB-disconnects on its own without any writes
-        # self._keepalive_thread = threading.Thread(
-        #     target=self._keepalive_loop,
-        #     daemon=True,
-        #     name="device-keepalive",
-        # )
-        # self._keepalive_thread.start()
+        # Start heartbeat loop (raw CONNECT command to prevent demo mode)
+        self._heartbeat_thread = threading.Thread(
+            target=self._heartbeat_loop,
+            daemon=True,
+            name="device-heartbeat",
+        )
+        self._heartbeat_thread.start()
 
-        logger.info("Macropad controller running (keepalive DISABLED for test)")
+        logger.info("Macropad controller running")
 
     def stop(self) -> None:
         """Clean shutdown."""
@@ -189,22 +188,19 @@ class MacropadController:
             if not self._shutdown.is_set():
                 self._refresh_dashboard()
 
-    def _keepalive_loop(self) -> None:
-        """Re-send screen image periodically to prevent firmware demo mode.
+    def _heartbeat_loop(self) -> None:
+        """Send raw CONNECT heartbeat to prevent firmware demo mode.
 
-        The M18 firmware reverts to demo mode (buttons=display-toggle,
-        LEDs=rainbow) after ~2 min of no display writes. It does NOT
-        USB-disconnect on its own. Periodic screen image re-sends keep
-        it in active mode — same pattern as official SDK examples which
-        continuously write to the display.
-
-        NOTE: Do NOT close/reopen the device — that CAUSES USB disconnects.
+        The M18 firmware expects periodic CRT+"CONNECT" HID writes to
+        stay in active mode. Without it, reverts to demo mode after ~100s.
+        We write directly to hidraw, bypassing the SDK's C library.
+        Same protocol as Bitfocus Companion.
         """
         while not self._shutdown.is_set():
-            self._shutdown.wait(45)  # Well within ~2 min firmware timeout
+            self._shutdown.wait(30)  # Every 30s (firmware timeout ~100s)
             if self._shutdown.is_set():
                 break
-            self._device.keepalive(screen_jpeg=self._screen_jpeg)
+            self._device.send_heartbeat()
 
     def _flash_led(self, r: int, g: int, b: int, duration: float = 0.5) -> None:
         """Flash the LED ring, then return to off."""

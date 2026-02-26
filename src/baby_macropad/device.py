@@ -120,6 +120,17 @@ class StreamDockDevice:
             self._device.open()
             self._device.init()
 
+            # PID 0x1000 = StreamDock N1EN per official SDK ProductIDs.py.
+            # The N1 class calls switchMode(2) after open — the M18 does NOT.
+            # Without this, the N1EN firmware may stay in demo mode and
+            # USB-disconnect after ~60s. We use M18 class for the key layout
+            # but add the N1's mode switch command.
+            try:
+                self._transport.switchMode(2)
+                logger.info("Mode switch (2) sent — N1EN firmware compatibility")
+            except Exception:
+                logger.debug("switchMode(2) not supported or failed (non-critical)")
+
             self._connected = True
             self._hidraw_path = device_dict["path"]
 

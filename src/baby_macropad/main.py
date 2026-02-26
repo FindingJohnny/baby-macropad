@@ -70,10 +70,12 @@ class MacropadController:
         self._device.set_screen_image(key_grid_jpeg)
         logger.info("Key grid sent to display (%d bytes)", len(key_grid_jpeg))
 
-        # Turn off LED ring (defaults to black/off)
-        r, g, b = self.config.device.led_idle_color
-        self._device.set_led_color(r, g, b)
-        self._device.set_led_brightness(0)
+        # Enable button events AFTER screen image is sent.
+        # Firmware resets mode if called before other transport commands.
+        self._device.enable_button_events()
+
+        # Turn off LED ring
+        self._device.turn_off_leds()
 
         # Register key callback
         self._device.set_key_callback(self._on_key_press)

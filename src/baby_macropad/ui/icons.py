@@ -164,6 +164,9 @@ def render_key_grid(buttons: dict[int, Any]) -> Image.Image:
     fallback_font = _get_font(20)
 
     icon_size = 40  # Icon render size in pixels
+    label_height = 13  # Approximate rendered height of 11pt label
+    icon_label_gap = 4  # Gap between icon and label
+    content_height = icon_size + icon_label_gap + label_height  # ~57px
 
     for key_num, button in buttons.items():
         pos = _key_position(key_num)
@@ -186,25 +189,28 @@ def render_key_grid(buttons: dict[int, Any]) -> Image.Image:
             fill=_darken(color, 0.12),
         )
 
+        # Vertically center icon+label as a group within the cell
+        top_offset = (CELL_H - content_height) // 2
+
         # Try to load and draw the Tabler icon
         asset_name = ICON_ASSETS.get(icon_name)
         icon_drawn = False
         if asset_name:
             tinted = _load_and_tint(asset_name, color, icon_size)
             if tinted:
-                # Center icon in upper 2/3 of cell
                 ix = x + (CELL_W - icon_size) // 2
-                iy = y + (CELL_H - icon_size) // 2 - 10
+                iy = y + top_offset
                 screen.paste(tinted, (ix, iy), tinted)  # Use alpha mask
                 icon_drawn = True
 
         if not icon_drawn:
-            # Fallback: draw text
+            # Fallback: draw text (centered in the icon area)
             text = label[:4].upper()
             bbox = draw.textbbox((0, 0), text, font=fallback_font)
             tw = bbox[2] - bbox[0]
+            th = bbox[3] - bbox[1]
             tx = x + (CELL_W - tw) // 2
-            ty = y + (CELL_H - 20) // 2 - 10
+            ty = y + top_offset + (icon_size - th) // 2
             draw.text((tx, ty), text, fill=color, font=fallback_font)
 
         # Draw label below icon
@@ -212,7 +218,7 @@ def render_key_grid(buttons: dict[int, Any]) -> Image.Image:
         bbox = draw.textbbox((0, 0), display_label, font=label_font)
         lw = bbox[2] - bbox[0]
         lx = x + (CELL_W - lw) // 2
-        ly = y + CELL_H - 16
+        ly = y + top_offset + icon_size + icon_label_gap
         draw.text((lx, ly), display_label, fill=color, font=label_font)
 
     return screen

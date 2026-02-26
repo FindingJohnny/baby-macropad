@@ -87,18 +87,6 @@ class StreamDockDevice:
             self._device.open()
             self._device.init()
 
-            # Switch to mode 1 to enable HID button event reporting.
-            # Without this, button presses toggle the display internally
-            # instead of being reported to the host.
-            self._transport.change_mode(1)
-
-            # Turn off the LED ring (init may re-enable it)
-            try:
-                self._device.set_led_color(0, 0, 0)
-                self._device.set_led_brightness(0)
-            except Exception:
-                pass
-
             self._connected = True
             logger.info("StreamDock M18 opened on %s", found[0]["path"])
             return True
@@ -121,6 +109,27 @@ class StreamDockDevice:
             self._transport = None
             self._connected = False
             logger.info("StreamDock device released")
+
+    def enable_button_events(self) -> None:
+        """Switch to mode 1 to enable HID button event reporting.
+
+        MUST be called AFTER set_screen_image(). Calling it before
+        other transport commands (brightness, background image) can
+        cause it to be silently reset by the firmware.
+        """
+        if self._transport:
+            self._transport.change_mode(1)
+            logger.info("Switched to mode 1 (button events enabled)")
+
+    def turn_off_leds(self) -> None:
+        """Turn off the LED ring completely."""
+        if self._device:
+            try:
+                self._device.set_led_color(0, 0, 0)
+                self._device.set_led_brightness(0)
+                logger.info("LED ring turned off")
+            except Exception:
+                pass
 
     def set_brightness(self, level: int) -> None:
         if self._device:
@@ -233,6 +242,12 @@ class StubDevice:
 
     def set_key_callback(self, callback: KeyCallback) -> None:
         self._key_callback = callback
+
+    def enable_button_events(self) -> None:
+        logger.debug("Stub: button events enabled (no-op)")
+
+    def turn_off_leds(self) -> None:
+        logger.debug("Stub: LEDs turned off (no-op)")
 
     def start_listening(self) -> None:
         logger.info("Stub: key listener started (no-op)")

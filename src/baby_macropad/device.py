@@ -127,6 +127,7 @@ class StreamDockDevice:
         """Turn off the LED ring completely."""
         if self._device:
             try:
+                self._device.reset_led_effect()
                 self._device.set_led_color(0, 0, 0)
                 self._device.set_led_brightness(0)
                 logger.info("LED ring turned off")

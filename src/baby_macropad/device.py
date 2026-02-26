@@ -180,21 +180,23 @@ class StreamDockDevice:
             except (AttributeError, Exception):
                 pass
 
-    def keepalive(self) -> None:
-        """Send a heartbeat to prevent firmware idle timeout.
+    def keepalive(self, brightness: int = 80) -> None:
+        """Reassert device state to prevent firmware idle timeout.
 
         The M18 firmware reverts to demo mode (display toggle + rainbow
-        LEDs) after ~2 minutes of no USB traffic. The SDK provides a
-        heartbeat() C binding specifically for this. We also reassert
-        LED-off state since the firmware restores rainbow cycling on idle.
+        LEDs) after ~2 minutes of no USB traffic. We re-send known-good
+        commands (brightness + LED off) to keep the firmware in our mode.
+
+        NOTE: The SDK's heartbeat() C binding causes "device disconnected"
+        errors on the HOTSPOTEKUSB variant — do NOT use it.
         """
-        if not self._transport:
+        if not self._device:
             return
         try:
-            self._transport.heartbeat()
+            self._device.set_brightness(brightness)
             self._device.set_led_brightness(0)
             self._device.set_led_color(0, 0, 0)
-            logger.debug("Keepalive sent")
+            logger.info("Keepalive sent")
         except Exception:
             logger.warning("Keepalive failed", exc_info=True)
 

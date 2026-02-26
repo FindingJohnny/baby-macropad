@@ -200,9 +200,10 @@ class MacropadController:
             if self._shutdown.is_set():
                 break
             try:
-                self._device.keepalive()
+                self._device.keepalive(brightness=self.config.device.brightness)
                 if self._screen_jpeg:
                     self._device.set_screen_image(self._screen_jpeg)
+                logger.info("Device keepalive completed")
             except Exception:
                 logger.warning("Device keepalive failed", exc_info=True)
 

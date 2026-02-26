@@ -124,12 +124,16 @@ class StreamDockDevice:
             logger.info("StreamDock device released")
 
     def turn_off_leds(self) -> None:
-        """Turn off the LED ring completely."""
+        """Turn off the LED ring completely.
+
+        NOTE: Do NOT call reset_led_effect() — it restores the firmware's
+        default color cycling animation. Instead, set brightness to 0 and
+        color to black to suppress the LEDs.
+        """
         if self._device:
             try:
-                self._device.reset_led_effect()
-                self._device.set_led_color(0, 0, 0)
                 self._device.set_led_brightness(0)
+                self._device.set_led_color(0, 0, 0)
                 logger.info("LED ring turned off")
             except Exception:
                 pass

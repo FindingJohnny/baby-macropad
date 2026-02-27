@@ -1,13 +1,16 @@
-"""Stream Dock M18 device wrapper — raw hidraw driver.
+"""Stream Dock M18 device wrapper — pure raw hidraw driver.
 
-Bypasses the MiraboxSpace SDK's C library (libtransport.so) for all HID I/O
-except image transmission. The C library's reader thread causes firmware USB
-disconnects after ~60s. Using raw hidraw directly keeps the device stable
-indefinitely (verified 70+ minutes with zero disconnects).
+100% raw hidraw I/O with zero MiraboxSpace SDK dependency. The SDK's C library
+(libtransport.so) causes firmware USB disconnects after ~60s due to its internal
+reader thread. Raw hidraw keeps the device stable indefinitely (verified 70+ min).
 
-Protocol from Bitfocus Companion (streamdock.ts):
-  - All writes: [0x00 report_id] + CRT_prefix + payload, padded to PACKET_SIZE+1
+Protocol reverse-engineered from Bitfocus Companion + strace of C library:
+  - All commands: [0x00 report_id] + CRT_prefix + payload, padded to PACKET_SIZE+1
   - CRT prefix: [0x43, 0x52, 0x54, 0x00, 0x00]
+  - Heartbeat: CRT + CONNECT [0x43,0x4F,0x4E,0x4E,0x45,0x43,0x54]
+  - Wake: CRT + DIS [0x44,0x49,0x53]
+  - Brightness: CRT + LIG [0x4C,0x49,0x47,0,0,level]
+  - Background image: CRT + LOG [0x4C,0x4F,0x47,size_be32,0x01] + JPEG chunks
   - Button events: data[9]=key_code, data[10]=state (0x01=press, 0x02=release)
 
 Hardware: VSD Inside / HOTSPOTEKUSB Stream Dock (VID=0x5548, PID=0x1000)
@@ -23,7 +26,7 @@ import os
 import select
 import threading
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -97,22 +100,20 @@ class DeviceError(Exception):
 
 
 class StreamDockDevice:
-    """Stream Dock driver using raw hidraw for HID I/O.
+    """Stream Dock driver using 100% raw hidraw — no SDK dependency.
 
-    Uses the SDK transport only for image sending (complex chunked protocol).
-    All other I/O (heartbeat, button reads, brightness, LED) goes through
-    raw hidraw to avoid the SDK's C library reader thread which causes
-    firmware USB disconnects.
+    All I/O (heartbeat, images, button reads, brightness) goes through
+    raw /dev/hidraw to avoid the SDK's C library reader thread which
+    causes firmware USB disconnects after ~60s.
     """
 
     def __init__(self, vid: int = DEFAULT_VID, pid: int = DEFAULT_PID) -> None:
         self._vid = vid
         self._pid = pid
-        self._transport: Any = None  # SDK transport (for images only)
         self._key_callback: KeyCallback | None = None
         self._connected = False
         self._hidraw_path: str | None = None
-        self._hidraw_fd: int | None = None  # Read+write fd for all raw HID I/O
+        self._hidraw_fd: int | None = None
         self._reader_thread: threading.Thread | None = None
         self._reader_stop = threading.Event()
 
@@ -121,20 +122,10 @@ class StreamDockDevice:
         return self._connected
 
     def open(self) -> bool:
-        """Discover and open the device.
-
-        Order matters:
-        1. Set up SDK transport for image sending FIRST (needs exclusive access)
-        2. Find and open hidraw for read+write (heartbeat, buttons, commands)
-        3. Send init sequence (wake, heartbeat)
+        """Discover and open the device via raw hidraw.
 
         Returns True if a device was found and opened.
         """
-        # Step 1: Set up SDK transport for image sending (must happen before
-        # we open hidraw, as the SDK's enumerate_devices needs access)
-        self._setup_image_transport()
-
-        # Step 2: Find device via sysfs
         self._hidraw_path = _find_hidraw(self._vid, self._pid)
         if not self._hidraw_path:
             logger.warning(
@@ -143,11 +134,9 @@ class StreamDockDevice:
             return False
 
         try:
-            # Open hidraw for read+write
             self._hidraw_fd = os.open(self._hidraw_path, os.O_RDWR)
             logger.info("Opened %s (fd=%d)", self._hidraw_path, self._hidraw_fd)
 
-            # Send init sequence via raw hidraw
             self._raw_write(_WAKE_PACKET)
             logger.info("Wake screen sent")
 
@@ -161,41 +150,6 @@ class StreamDockDevice:
             logger.exception("Failed to open StreamDock device")
             self._cleanup_fd()
             return False
-
-    def _setup_image_transport(self) -> None:
-        """Set up the SDK transport for image sending only.
-
-        We create the transport and open it, but do NOT create a StreamDockM18
-        device object (which would start the problematic C library reader thread).
-        """
-        try:
-            from StreamDock.Transport.LibUSBHIDAPI import LibUSBHIDAPI
-        except ImportError:
-            logger.info("StreamDock SDK not installed — image sending unavailable")
-            return
-
-        try:
-            # Enumerate to get device info needed for transport
-            enum_transport = LibUSBHIDAPI()
-            found = enum_transport.enumerate_devices(self._vid, self._pid)
-            if not found:
-                logger.warning("SDK enumeration found no devices (image transport unavailable)")
-                return
-
-            device_dict = found[0]
-            device_info = LibUSBHIDAPI.create_device_info_from_dict(device_dict)
-            transport = LibUSBHIDAPI(device_info)
-
-            # Open the transport (for image writes)
-            transport.open(bytes(device_dict["path"], "utf-8"))
-            # Set M18/N1 report sizes
-            transport.set_report_size(513, 1025, 0)
-
-            self._transport = transport
-            logger.info("SDK image transport ready")
-        except Exception:
-            logger.warning("Failed to set up SDK image transport (images will be unavailable)")
-            self._transport = None
 
     def _raw_write(self, data: bytes) -> None:
         """Write raw data to hidraw."""
@@ -213,22 +167,11 @@ class StreamDockDevice:
 
     def close(self) -> None:
         """Clean shutdown."""
-        # Stop reader thread
         self._reader_stop.set()
         if self._reader_thread and self._reader_thread.is_alive():
             self._reader_thread.join(timeout=2.0)
 
-        # Close SDK transport (for images)
-        if self._transport:
-            try:
-                self._transport.close()
-            except Exception:
-                pass
-            self._transport = None
-
-        # Close hidraw fd
         self._cleanup_fd()
-
         self._connected = False
         logger.info("StreamDock device released")
 
@@ -244,20 +187,37 @@ class StreamDockDevice:
             logger.warning("Failed to set brightness: %s", e)
 
     def set_screen_image(self, jpeg_data: bytes) -> None:
-        """Send a full 480x272 JPEG image to the LCD panel.
+        """Send a full 480x272 JPEG to the LCD via CRT+LOG protocol.
 
-        Uses the SDK transport's set_background_image_stream (complex chunked
-        protocol handled by the C library). Falls back gracefully if the
-        transport isn't available.
+        Protocol (captured via strace of the C library):
+          1. LOG header: CRT + [L,O,G, size_be32, layer=0x01]
+          2. JPEG data in 1024-byte chunks: [0x00] + chunk, padded to 1025
         """
-        if not self._transport:
-            logger.debug("No image transport — skipping screen image")
+        if self._hidraw_fd is None:
             return
         try:
-            self._transport.set_background_image_stream(jpeg_data)
-            logger.debug("Screen image sent (%d bytes)", len(jpeg_data))
-        except Exception:
-            logger.exception("Failed to send screen image")
+            size = len(jpeg_data)
+            # LOG header command
+            header = bytes([
+                0x4C, 0x4F, 0x47,  # "LOG"
+                (size >> 24) & 0xFF,
+                (size >> 16) & 0xFF,
+                (size >> 8) & 0xFF,
+                size & 0xFF,
+                0x01,  # layer
+            ])
+            self._raw_write(_build_cmd(header))
+
+            # Send JPEG data in chunks (no CRT prefix, just report ID + data)
+            for offset in range(0, size, _PACKET_SIZE):
+                chunk = jpeg_data[offset:offset + _PACKET_SIZE]
+                packet = (b'\x00' + chunk).ljust(_PACKET_SIZE + 1, b'\x00')
+                self._raw_write(packet)
+
+            logger.debug("Screen image sent (%d bytes, %d chunks)",
+                         size, (size + _PACKET_SIZE - 1) // _PACKET_SIZE)
+        except OSError as e:
+            logger.warning("Failed to send screen image: %s", e)
 
     def set_screen_image_file(self, image_path: str | Path) -> None:
         """Send a 480x272 JPEG file to the LCD panel."""
@@ -268,29 +228,22 @@ class StreamDockDevice:
             logger.exception("Failed to send screen image from %s", image_path)
 
     def set_led_color(self, r: int, g: int, b: int) -> None:
-        """Set the LED ring color via SDK transport."""
-        if self._transport:
-            try:
-                self._transport.set_led_color(24, r, g, b)
-            except Exception:
-                pass
+        """Set LED ring color (no-op until CRT LED protocol is implemented)."""
+        pass
 
     def set_led_brightness(self, level: int) -> None:
-        """Set LED ring brightness via SDK transport."""
-        if self._transport:
-            try:
-                self._transport.set_led_brightness(level)
-            except Exception:
-                pass
+        """Set LED ring brightness via CRT+LBLIG command."""
+        try:
+            self._raw_write(_build_cmd(bytes([
+                0x4C, 0x42, 0x4C, 0x49, 0x47,  # "LBLIG"
+                0x00, 0x00, level,
+            ])))
+        except OSError:
+            pass
 
     def turn_off_leds(self) -> None:
-        """Turn off the LED ring.
-
-        Set brightness to 0 and color to black. Do NOT call reset_led_effect()
-        which restores the firmware's default color cycling animation.
-        """
+        """Turn off the LED ring."""
         self.set_led_brightness(0)
-        self.set_led_color(0, 0, 0)
         logger.info("LED ring turned off")
 
     def send_heartbeat(self) -> bool:

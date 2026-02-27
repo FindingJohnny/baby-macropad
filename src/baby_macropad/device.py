@@ -137,8 +137,13 @@ class StreamDockDevice:
             self._hidraw_fd = os.open(self._hidraw_path, os.O_RDWR)
             logger.info("Opened %s (fd=%d)", self._hidraw_path, self._hidraw_fd)
 
+            # Init sequence must be: wake → brightness → heartbeat
+            # (verified stable for 70+ minutes in test_hidraw_direct.py)
             self._raw_write(_WAKE_PACKET)
             logger.info("Wake screen sent")
+
+            self._raw_write(_build_cmd(bytes([0x4C, 0x49, 0x47, 0x00, 0x00, 80])))
+            logger.info("Init brightness 80 sent")
 
             self._raw_write(_HEARTBEAT_PACKET)
             logger.info("Initial CONNECT heartbeat sent")

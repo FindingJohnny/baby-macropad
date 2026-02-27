@@ -191,13 +191,11 @@ class MacropadController:
     def _heartbeat_loop(self) -> None:
         """Send raw CONNECT heartbeat to prevent firmware demo mode.
 
-        The M18 firmware expects periodic CRT+"CONNECT" HID writes to
-        stay in active mode. Without it, reverts to demo mode after ~100s.
-        We write directly to hidraw, bypassing the SDK's C library.
-        Same protocol as Bitfocus Companion.
+        The M18 firmware expects periodic CRT+"CONNECT" HID writes.
+        10s interval verified stable for 70+ minutes in testing.
         """
         while not self._shutdown.is_set():
-            self._shutdown.wait(30)  # Every 30s (firmware timeout ~100s)
+            self._shutdown.wait(10)  # Every 10s (proven stable)
             if self._shutdown.is_set():
                 break
             self._device.send_heartbeat()

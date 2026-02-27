@@ -57,22 +57,39 @@ _REFRESH_PACKET = _build_cmd(_CMD_REFRESH)
 
 
 def _find_hidraw(vid: int, pid: int) -> str | None:
-    """Find the hidraw device path for a given VID/PID via sysfs."""
+    """Find the hidraw device path for the CONTROL interface (input0).
+
+    The device has two HID interfaces:
+      - input0 (interface 0): control + button events (usage_page=0xFF60)
+      - input1 (interface 1): standard keyboard HID (usage_page=1)
+
+    We must use input0 for the CRT protocol and button events.
+    """
     vid_hex = f"{vid:08X}"
     pid_hex = f"{pid:08X}"
     target_id = f"0003:{vid_hex}:{pid_hex}"
 
+    matches = []
     for hidraw_dir in sorted(glob.glob("/sys/class/hidraw/hidraw*/device")):
         uevent_path = os.path.join(hidraw_dir, "uevent")
         try:
             with open(uevent_path) as f:
-                for line in f:
-                    if line.startswith("HID_ID=") and target_id in line.upper():
-                        devname = os.path.basename(os.path.dirname(hidraw_dir))
-                        return f"/dev/{devname}"
+                uevent = f.read()
+            if target_id not in uevent.upper():
+                continue
+            devname = os.path.basename(os.path.dirname(hidraw_dir))
+            devpath = f"/dev/{devname}"
+            # Prefer input0 (control interface) over input1 (keyboard)
+            is_input0 = "input0" in uevent
+            matches.append((devpath, is_input0))
         except OSError:
             continue
-    return None
+
+    # Return input0 if found, otherwise first match
+    for path, is_input0 in matches:
+        if is_input0:
+            return path
+    return matches[0][0] if matches else None
 
 
 class DeviceError(Exception):

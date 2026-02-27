@@ -52,6 +52,10 @@ class MacropadController:
         # Cached display state for keepalive
         self._screen_jpeg: bytes | None = None
 
+        # Button debounce: track last press time per key
+        self._last_key_press: dict[int, float] = {}
+        self._debounce_seconds = 0.3
+
         # Device (try real, fall back to stub)
         self._device = StreamDockDevice()
 
@@ -126,6 +130,13 @@ class MacropadController:
         """Handle a key press event from the device."""
         if not is_pressed:
             return  # Only act on press, not release
+
+        # Debounce: ignore repeated events within 300ms window
+        now = time.monotonic()
+        last = self._last_key_press.get(key, 0.0)
+        if now - last < self._debounce_seconds:
+            return
+        self._last_key_press[key] = now
 
         button = self.config.buttons.get(key)
         if not button:

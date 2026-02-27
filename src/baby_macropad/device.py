@@ -116,6 +116,7 @@ class StreamDockDevice:
         self._hidraw_fd: int | None = None
         self._reader_thread: threading.Thread | None = None
         self._reader_stop = threading.Event()
+        self._write_lock = threading.Lock()
 
     @property
     def connected(self) -> bool:
@@ -157,9 +158,10 @@ class StreamDockDevice:
             return False
 
     def _raw_write(self, data: bytes) -> None:
-        """Write raw data to hidraw."""
+        """Write raw data to hidraw (thread-safe)."""
         if self._hidraw_fd is not None:
-            os.write(self._hidraw_fd, data)
+            with self._write_lock:
+                os.write(self._hidraw_fd, data)
 
     def _cleanup_fd(self) -> None:
         """Close the hidraw file descriptor."""
@@ -197,32 +199,39 @@ class StreamDockDevice:
         Protocol (captured via strace of the C library):
           1. LOG header: CRT + [L,O,G, size_be32, layer=0x01]
           2. JPEG data in 1024-byte chunks: [0x00] + chunk, padded to 1025
+          3. STP refresh: CRT + [S,T,P] to commit the image to display
         """
         if self._hidraw_fd is None:
             return
-        try:
-            size = len(jpeg_data)
-            # LOG header command
-            header = bytes([
-                0x4C, 0x4F, 0x47,  # "LOG"
-                (size >> 24) & 0xFF,
-                (size >> 16) & 0xFF,
-                (size >> 8) & 0xFF,
-                size & 0xFF,
-                0x01,  # layer
-            ])
-            self._raw_write(_build_cmd(header))
+        # Hold lock for entire sequence (header + chunks + STP) to prevent
+        # heartbeat/LED writes from interleaving and corrupting the transfer.
+        with self._write_lock:
+            try:
+                size = len(jpeg_data)
+                # LOG header command
+                header = bytes([
+                    0x4C, 0x4F, 0x47,  # "LOG"
+                    (size >> 24) & 0xFF,
+                    (size >> 16) & 0xFF,
+                    (size >> 8) & 0xFF,
+                    size & 0xFF,
+                    0x01,  # layer
+                ])
+                os.write(self._hidraw_fd, _build_cmd(header))
 
-            # Send JPEG data in chunks (no CRT prefix, just report ID + data)
-            for offset in range(0, size, _PACKET_SIZE):
-                chunk = jpeg_data[offset:offset + _PACKET_SIZE]
-                packet = (b'\x00' + chunk).ljust(_PACKET_SIZE + 1, b'\x00')
-                self._raw_write(packet)
+                # Send JPEG data in chunks (no CRT prefix, just report ID + data)
+                for offset in range(0, size, _PACKET_SIZE):
+                    chunk = jpeg_data[offset:offset + _PACKET_SIZE]
+                    packet = (b'\x00' + chunk).ljust(_PACKET_SIZE + 1, b'\x00')
+                    os.write(self._hidraw_fd, packet)
 
-            logger.debug("Screen image sent (%d bytes, %d chunks)",
-                         size, (size + _PACKET_SIZE - 1) // _PACKET_SIZE)
-        except OSError as e:
-            logger.warning("Failed to send screen image: %s", e)
+                # STP refresh — commits the image to the display
+                os.write(self._hidraw_fd, _REFRESH_PACKET)
+
+                logger.debug("Screen image sent (%d bytes, %d chunks)",
+                             size, (size + _PACKET_SIZE - 1) // _PACKET_SIZE)
+            except OSError as e:
+                logger.warning("Failed to send screen image: %s", e)
 
     def set_screen_image_file(self, image_path: str | Path) -> None:
         """Send a 480x272 JPEG file to the LCD panel."""
@@ -255,12 +264,12 @@ class StreamDockDevice:
         """Send CRT+CONNECT heartbeat to prevent firmware idle timeout.
 
         The firmware reverts to demo mode without periodic CONNECT commands.
-        Written directly to hidraw (bypasses SDK C library).
         """
         if self._hidraw_fd is None:
             return False
         try:
-            os.write(self._hidraw_fd, _HEARTBEAT_PACKET)
+            with self._write_lock:
+                os.write(self._hidraw_fd, _HEARTBEAT_PACKET)
             logger.debug("Heartbeat CONNECT sent")
             return True
         except OSError as e:

@@ -1,6 +1,6 @@
 device:
   brightness: 80
-  led_idle_color: [30, 0, 60]  # dim purple
+  led_idle_color: [0, 0, 0]  # off (nursery dark — no light disturbance)
 
 baby_basics:
   api_url: "https://dev.baby.bretzfam.com/api/v1"
@@ -12,117 +12,148 @@ home_assistant:
   token: "${HA_TOKEN}"
   enabled: false
 
+# Column-based button layout:
+#   Col 0 (Feeding): Key 11=Breast L, Key 6=Breast R, Key 1=Bottle
+#   Col 1 (Diaper):  Key 12=Pee, Key 7=Poop, Key 2=Both
+#   Col 2 (Sleep+):  Key 13=Sleep, Key 8=Pump, Key 3=Notes
+#   Col 3 (HA):      Keys 14/9/4 reserved (Phase 2)
+#   Col 4 (System):  Key 15=Settings
 buttons:
-  1:
-    label: "Breast L"
+  # Column 0 — Feeding
+  11:
+    label: "LEFT"
     icon: "breast_left"
     action: "baby_basics.log_feeding"
     params:
       type: "breast"
       started_side: "left"
     feedback:
-      success_led: [0, 255, 0]
+      success_led: [102, 204, 102]
 
-  2:
-    label: "Breast R"
+  6:
+    label: "RIGHT"
     icon: "breast_right"
     action: "baby_basics.log_feeding"
     params:
       type: "breast"
       started_side: "right"
     feedback:
-      success_led: [0, 255, 0]
+      success_led: [102, 204, 102]
 
-  3:
-    label: "Bottle"
+  1:
+    label: "BOTTLE"
     icon: "bottle"
     action: "baby_basics.log_feeding"
     params:
       type: "bottle"
-      amount_ml: 120
     feedback:
-      success_led: [0, 255, 0]
+      success_led: [102, 204, 102]
 
-  6:
-    label: "Pee"
+  # Column 1 — Diaper
+  12:
+    label: "PEE"
     icon: "diaper_pee"
     action: "baby_basics.log_diaper"
     params:
       type: "pee"
     feedback:
-      success_led: [0, 255, 0]
+      success_led: [204, 170, 68]
 
   7:
-    label: "Poop"
+    label: "POOP"
     icon: "diaper_poop"
     action: "baby_basics.log_diaper"
     params:
       type: "poop"
     feedback:
-      success_led: [0, 255, 0]
+      success_led: [204, 170, 68]
 
-  8:
-    label: "Both"
+  2:
+    label: "BOTH"
     icon: "diaper_both"
     action: "baby_basics.log_diaper"
     params:
       type: "both"
     feedback:
-      success_led: [0, 255, 0]
+      success_led: [204, 170, 68]
 
-  9:
-    label: "Sleep"
+  # Column 2 — Sleep + Pump + Notes
+  13:
+    label: "SLEEP"
     icon: "sleep"
     action: "baby_basics.toggle_sleep"
     params: {}
     feedback:
-      success_led: [0, 255, 0]
+      success_led: [102, 153, 204]
 
-  10:
-    label: "Note"
-    icon: "note"
+  8:
+    label: "PUMP"
+    icon: "pump"
     action: "baby_basics.log_note"
     params:
-      content: "Quick note logged"
+      content: "Pumping session"
     feedback:
-      success_led: [0, 255, 0]
+      success_led: [153, 153, 153]
 
-  # Home Assistant (Row 3)
-  11:
-    label: "Nursery Light"
-    icon: "light"
-    action: "home_assistant.toggle"
-    params:
-      entity_id: "light.nursery"
+  3:
+    label: "NOTES"
+    icon: "note"
+    action: "baby_basics.notes_submenu"
+    params: {}
+    feedback:
+      success_led: [153, 153, 153]
 
-  12:
-    label: "Night Light"
-    icon: "light"
-    action: "home_assistant.toggle"
-    params:
-      entity_id: "light.nightlight"
-
-  13:
-    label: "Fan"
-    icon: "fan"
-    action: "home_assistant.toggle"
-    params:
-      entity_id: "fan.nursery"
-
-  14:
-    label: "Sound Machine"
-    icon: "sound"
-    action: "home_assistant.toggle"
-    params:
-      entity_id: "media_player.sound_machine"
-
+  # Column 4 — System
   15:
-    label: "All Off"
-    icon: "scene_off"
-    action: "home_assistant.scene"
-    params:
-      entity_id: "scene.nursery_off"
+    label: "SETTINGS"
+    icon: "gear"
+    action: "macropad.settings"
+    params: {}
+    feedback:
+      success_led: [200, 200, 200]
 
 dashboard:
   poll_interval_seconds: 60
   show_clock: true
+
+# Notes submenu categories (up to 14, leaving one button for Back)
+notes_categories:
+  - label: "Meds"
+    content: "Medication given"
+    icon: "pill"
+  - label: "Temp"
+    content: "Temperature taken"
+    icon: "thermometer"
+  - label: "Milestone"
+    content: "Milestone logged"
+    icon: "star"
+  - label: "General"
+    content: "Quick note logged"
+    icon: "note"
+
+# Display management
+display:
+  auto_sleep_minutes: 10        # LCD off after N minutes idle (0 = never)
+  off_during_sleep: true        # Dark display when baby sleep is active
+  brightness_schedule:
+    enabled: false
+    day_brightness: 80
+    night_brightness: 20
+    night_start: "20:00"
+    night_end: "06:00"
+
+# Animation settings
+animations:
+  enabled: true
+  quiet_hours:
+    enabled: false
+    start: "21:00"
+    end: "06:00"
+
+# Settings menu defaults (changeable at runtime via settings screen)
+settings_menu:
+  timer_duration_seconds: 7     # Auto-commit timer on detail screens
+  skip_breast_detail: false     # Log breast feedings instantly
+  celebration_style: "color_fill"  # "color_fill" | "radiate" | "randomize" | "none"
+  lock_enabled: false
+  lock_pin: ""

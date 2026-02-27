@@ -67,13 +67,13 @@ Triggered by buttons requiring additional input before logging. Uses the same 5x
 ```
 [  option A  ] [  option B  ] [  option C  ] [  option D  ] [  timer(7s) ]
 [            ] [            ] [            ] [            ] [            ]
-[            ] [            ] [            ] [            ] [ Back/Cancel ]
+[ Back/Cancel] [            ] [            ] [            ] [            ]
 ```
 
 - **Timer** displayed top-right (key 15 area). Counts down from configured default (7s). Expires = auto-commit with pre-selected default.
 - **Default option** is pre-highlighted (brighter tint + subtle card outline).
 - **Option buttons** fill the top row (options vary by action — see per-action specs below).
-- **Back/Cancel** mapped to bottom-right (key 5). Returns to home grid without logging.
+- **Back/Cancel** mapped to bottom-left (key 1). Returns to home grid without logging. Key 1 is the consistent "escape" position across all screens (Back on detail, UNDO on confirmation).
 - **Tapping any option** = immediate commit + advance to confirmation. No separate confirm step.
 
 **Timer behavior:**
@@ -88,7 +88,7 @@ Shown after any successful log. Auto-dismisses after 2 seconds.
 **Grid usage:**
 - Creative use of the full grid for visual celebration (category-colored pattern, animations).
 - Celebration style options: pick a fixed style, randomize, or disable (Settings > Celebration Style).
-- Exactly **one key is active**: the UNDO button (mapped to a prominent central position).
+- Exactly **one key is active**: the UNDO button (mapped to key 1, bottom-left — same "escape" position as Back on detail screens).
 - All other buttons are decorative during the 2s window.
 
 **UNDO behavior:**
@@ -122,8 +122,8 @@ Full-screen takeover when baby sleep is active. This is not a standard grid — 
 - Moon icon centered, large (60-72px — full visible height of a button cell, no label needed).
 - Elapsed sleep timer displayed below the icon ("2h 14m" style).
 - "sleeping..." label in muted category-sleep color.
-- WAKE UP button rendered across the bottom row (keys 1-5 all map to wake action, effectively the entire bottom strip).
-- **Only WAKE UP responds.** All other buttons are silent during sleep mode.
+- WAKE UP hint rendered at key 13 position (col 2, top row — same physical key as Sleep on the home grid).
+- **Only key 13 ends sleep.** All other 14 keys wake the screen (brighten + show sleep view + reset 30s idle timer) but do NOT end the sleep. This prevents accidental sleep termination from brushing the device.
 
 **Screen brightness during sleep:**
 - Immediately dims to minimum brightness (5-10, not 0 — just barely visible).
@@ -371,7 +371,7 @@ Per-LED control is confirmed available via `SETLB` command (24 LEDs, per-LED RGB
 
 | Event / State | LED behavior |
 |---|---|
-| Idle / home grid | Dim purple ring `(30, 0, 60)` (current default) |
+| Idle / home grid | All LEDs off (nursery dark — no light disturbance) |
 | Feeding logged | Green flash full ring, ~0.5s |
 | Diaper logged | Amber flash full ring, ~0.5s |
 | Sleep started | Slow blue pulse, continuous while sleeping |
@@ -382,7 +382,7 @@ Per-LED control is confirmed available via `SETLB` command (24 LEDs, per-LED RGB
 | Error / offline queue | Red pulse, 2s |
 | Sleep mode display-off | All LEDs off |
 
-Confirmation flash pattern: full ring at category color for 0.5s, fade to idle over 0.5s. Total 1s LED effect.
+Confirmation flash pattern: full ring at category color for 0.5s, fade to off over 0.5s. Total 1s LED effect.
 
 ---
 

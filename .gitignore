@@ -34,3 +34,6 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Generated calibration/test images (machine-specific, regenerate with tools/)
+tools/test_images/

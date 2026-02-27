@@ -15,7 +15,7 @@ from PIL import Image
 logger = logging.getLogger(__name__)
 
 # Icon asset directory (relative to package root)
-_ASSETS_DIR = Path(__file__).parent.parent.parent.parent / "assets" / "icons"
+_ASSETS_DIR = Path(__file__).parent.parent.parent.parent.parent / "assets" / "icons"
 
 # Cache loaded + tinted icons
 _icon_cache: dict[str, Image.Image] = {}

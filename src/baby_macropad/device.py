@@ -421,10 +421,12 @@ class StreamDockDevice:
                 try:
                     # Re-run init sequence: wake → brightness → heartbeat
                     # Write directly to fd (bypass _raw_write which checks _reconnecting)
+                    # Apply same gamma curve as set_brightness()
+                    gamma_brightness = round(pow(self._brightness / 100, 0.75) * 100)
                     with self._write_lock:
                         os.write(fd, _WAKE_PACKET)
                         os.write(fd, _build_cmd(bytes([
-                            0x4C, 0x49, 0x47, 0x00, 0x00, self._brightness,
+                            0x4C, 0x49, 0x47, 0x00, 0x00, gamma_brightness,
                         ])))
                         os.write(fd, _HEARTBEAT_PACKET)
 

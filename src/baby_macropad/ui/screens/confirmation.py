@@ -16,7 +16,7 @@ from ..framework.primitives import (
 )
 from ..framework.screen import CellDef, ScreenDef
 from ..framework.widgets import Card, Spacer, Text
-from ..framework.text_engine import get_font
+from ..framework.text_engine import fit_text, get_font
 
 
 def build_confirmation_screen(
@@ -64,24 +64,19 @@ def build_confirmation_screen(
             iy = VIS_ROW_Y[0] + (VIS_ROW_H[0] - icon_size) // 2
             img.paste(tinted, (ix, iy), tinted)
 
-        # Action label in middle cell of column
-        label_font = get_font(14, bold=True)
-        lb = draw.textbbox((0, 0), action_label, font=label_font)
-        lw = lb[2] - lb[0]
-        lh = lb[3] - lb[1]
-        lx = VIS_COL_X[col] + (VIS_COL_W[col] - lw) // 2
+        # Action label in middle cell of column (auto-shrink to fit)
+        col_w = VIS_COL_W[col]
+        label_font, display_label, lw, lh = fit_text(draw, action_label, col_w - 4, VIS_ROW_H[1], (14, 12, 10))
+        lx = VIS_COL_X[col] + (col_w - lw) // 2
         ly = VIS_ROW_Y[1] + (VIS_ROW_H[1] - lh) // 2
-        draw.text((lx, ly), action_label, fill=(255, 255, 255), font=label_font)
+        draw.text((lx, ly), display_label, fill=(255, 255, 255), font=label_font)
 
-        # Context line full-width in bottom row
+        # Context line full-width in bottom row (auto-shrink to fit)
         if context_line:
-            context_font = get_font(11, bold=True)
-            cb = draw.textbbox((0, 0), context_line, font=context_font)
-            cw = cb[2] - cb[0]
-            ch = cb[3] - cb[1]
+            context_font, display_context, cw, ch = fit_text(draw, context_line, SCREEN_W - 20, VIS_ROW_H[2], (11, 10, 9))
             cx = (SCREEN_W - cw) // 2
             cy = VIS_ROW_Y[2] + (VIS_ROW_H[2] - ch) // 2
-            draw.text((cx, cy), context_line, fill=SECONDARY_TEXT, font=context_font)
+            draw.text((cx, cy), display_context, fill=SECONDARY_TEXT, font=context_font)
 
     cells: dict[int, CellDef] = {}
 

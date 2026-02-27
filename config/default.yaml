@@ -97,7 +97,7 @@ buttons:
   # Column 4 — System
   15:
     label: "SETTINGS"
-    icon: "gear"
+    icon: "settings"
     action: "macropad.settings"
     params: {}
     feedback:

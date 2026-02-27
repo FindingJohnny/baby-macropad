@@ -68,13 +68,21 @@ def build_detail_screen(
         on_press="back",
     )
 
-    # Title rendered via pre_render (spans cols 1-3, centered in middle row)
+    # Title + instruction rendered via pre_render (spans cols 1-3, centered in middle row)
     def _draw_title(img, draw):
         title_font = get_font(16, bold=True)
         tb = draw.textbbox((0, 0), title, font=title_font)
         tw = tb[2] - tb[0]
+        th = tb[3] - tb[1]
         center_x = (VIS_COL_X[1] + VIS_COL_X[3] + VIS_COL_W[3]) // 2
-        ty = VIS_ROW_Y[1] + (VIS_ROW_H[1] - (tb[3] - tb[1])) // 2
+        ty = VIS_ROW_Y[1] + (VIS_ROW_H[1] - th) // 2 - 8
         draw.text((center_x - tw // 2, ty), title, fill=(255, 255, 255), font=title_font)
+
+        # Instruction hint below title
+        hint_font = get_font(10, bold=True)
+        hint = "tap option or wait"
+        hb = draw.textbbox((0, 0), hint, font=hint_font)
+        hw = hb[2] - hb[0]
+        draw.text((center_x - hw // 2, ty + th + 4), hint, fill=SECONDARY_TEXT, font=hint_font)
 
     return ScreenDef(name="detail", cells=cells, pre_render=_draw_title)

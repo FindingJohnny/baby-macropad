@@ -252,7 +252,8 @@ class MacropadController:
         else:
             if s.mode != "home_grid":
                 self._sm.return_home()
-            screen = build_home_grid(self.config.buttons)
+            runtime_state = self._build_runtime_state()
+            screen = build_home_grid(self.config.buttons, runtime_state)
 
         self._router.set_screen(screen)
         jpeg = self._renderer.render(screen)
@@ -268,6 +269,29 @@ class MacropadController:
             return elapsed, start.astimezone().strftime("%-I:%M %p")
         except (ValueError, TypeError):
             return 0, ""
+
+    def _build_runtime_state(self) -> dict[int, str]:
+        """Build runtime_state overlay for home grid buttons."""
+        rs: dict[int, str] = {}
+        s = self._sm.state
+        # Active sleep overlay
+        if s.sleep_active and s.sleep_start_time:
+            elapsed, _ = self._calc_sleep_elapsed()
+            if elapsed >= 60:
+                elapsed_str = f"{elapsed // 60}h {elapsed % 60}m"
+            else:
+                elapsed_str = f"{elapsed}m"
+            for key_num, btn in self.config.buttons.items():
+                if btn.icon == "sleep":
+                    rs[key_num] = f"active:{elapsed_str}"
+        # Suggested breast side
+        dashboard = s.dashboard
+        if isinstance(dashboard, DashboardData) and dashboard.suggested_side:
+            suggested = dashboard.suggested_side  # "left" or "right"
+            for key_num, btn in self.config.buttons.items():
+                if btn.icon == f"breast_{suggested}":
+                    rs[key_num] = "suggested"
+        return rs
 
     # --- Key handling ---
 
@@ -333,7 +357,10 @@ class MacropadController:
     def _handle_confirmation_press(self, key: int, snap: Any) -> None:
         if key == 1 and snap.state.confirmation_resource_id:
             self._execute_undo()
-        # All other keys ignored
+            return
+        # Pressing any key during confirmation dismisses it early
+        self._sm.return_home()
+        self.refresh_display()
 
     def _handle_sleep_mode_press(self, key: int) -> None:
         self._device.set_brightness(self.config.device.brightness)
@@ -371,6 +398,8 @@ class MacropadController:
                 self._sm.state.timer_seconds = self._settings.timer_duration_seconds
                 self._sm.state.celebration_style = self._settings.celebration_style
                 self._sm.state.skip_breast_detail = self._settings.skip_breast_detail
+                # Apply brightness immediately if that's what changed
+                self._device.set_brightness(self._settings.brightness)
                 self.refresh_display()
                 return
 
@@ -394,6 +423,9 @@ class MacropadController:
         )
 
     def _commit_detail_default(self) -> None:
+        # Guard: if mode already changed (e.g., user pressed a key), bail out
+        if self._sm.mode != "detail":
+            return
         cfg = DETAIL_CONFIGS.get(self._sm.get_detail_action() or "")
         if not cfg:
             self._sm.return_home()
@@ -409,12 +441,12 @@ class MacropadController:
         elif icon_name == "pump":
             cat, label, rtype = "pump", "Pump", "notes"
         else:
-            cat, label, rtype = "feeding", f"{button.label} logged", "feedings"
+            cat, label, rtype = "feeding", button.label, "feedings"
         color = {"feeding": (102, 204, 102), "diaper": (204, 170, 68)}.get(cat, (200, 200, 200))
         self._call_api_and_confirm(button.action, dict(button.params), label, icon_name, color, cat, column, rtype)
 
     def _execute_note_action(self, content: str, label: str) -> None:
-        self._call_api_and_confirm("baby_basics.log_note", {"content": content}, f"{label} logged", "note", (153, 153, 153), "note", 2, "notes")
+        self._call_api_and_confirm("baby_basics.log_note", {"content": content}, label, "note", (153, 153, 153), "note", 2, "notes")
 
     def _call_api_and_confirm(self, api_action: str, params: dict, label: str, icon: str,
                               category_color: tuple[int, int, int], category: str, column: int, resource_type: str) -> None:
@@ -498,7 +530,7 @@ class MacropadController:
             duration_str = self._calc_duration_str(start_time)
             self._sm.exit_sleep_mode()
             self._led.flash_wake()
-            self._sm.enter_confirmation("baby_basics.end_sleep", "Baby's awake!", duration_str,
+            self._sm.enter_confirmation("baby_basics.end_sleep", "Awake!", duration_str,
                                         "sunrise", (255, 220, 150), 2, time.monotonic() + CONFIRMATION_DURATION, None, "sleeps")
         except (BabyBasicsAPIError, ConnectionError, Exception) as e:
             logger.warning("Failed to end sleep: %s", e)

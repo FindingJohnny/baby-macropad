@@ -68,6 +68,9 @@ ICON_ASSETS: dict[str, str | tuple[str, str]] = {
     "sleep": "moon",
     "note": "note",
     "settings": "gear",
+    "pill": "pill",
+    "thermometer": "thermometer",
+    "star": "star",
 }
 
 # Labels shown below the icon
@@ -80,12 +83,15 @@ ICON_LABELS = {
     "diaper_poop": "POOP",
     "diaper_both": "BOTH",
     "sleep": "SLEEP",
-    "note": "NOTE",
+    "note": "NOTES",
     "settings": "SETTINGS",
     "light": "LIGHT",
     "fan": "FAN",
     "sound": "SOUND",
     "scene_off": "OFF",
+    "pill": "MEDS",
+    "thermometer": "TEMP",
+    "star": "MILSTN",
 }
 
 

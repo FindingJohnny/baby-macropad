@@ -9,15 +9,16 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
+from .icons import BG_COLOR, SECONDARY_TEXT, SCREEN_H, SCREEN_W
+
 logger = logging.getLogger(__name__)
 
-SCREEN_SIZE = (480, 272)
+SCREEN_SIZE = (SCREEN_W, SCREEN_H)
 
 # Colors from the UX design doc (dark mode)
-BG_COLOR = (28, 28, 30)           # bbBackground dark
 SURFACE_COLOR = (44, 44, 46)      # bbSurface dark
 TEXT_PRIMARY = (229, 229, 231)     # bbText dark
-TEXT_SECONDARY = (142, 142, 147)   # bbTextSecondary dark
+TEXT_SECONDARY = SECONDARY_TEXT    # bbTextSecondary dark
 FEED_ACCENT = (143, 184, 150)     # Desaturated jewel green
 DIAPER_ACCENT = (196, 149, 106)   # Desaturated jewel amber
 SLEEP_ACCENT = (123, 155, 196)    # Desaturated jewel blue

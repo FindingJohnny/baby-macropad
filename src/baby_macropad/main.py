@@ -39,6 +39,14 @@ try:
     from baby_macropad.ui.sleep import render_sleep_mode
 except ImportError:
     render_sleep_mode = None  # type: ignore[assignment]
+try:
+    from baby_macropad.ui.notes import render_notes_submenu
+except ImportError:
+    render_notes_submenu = None  # type: ignore[assignment]
+try:
+    from baby_macropad.ui.settings import render_settings_screen
+except ImportError:
+    render_settings_screen = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -67,15 +75,15 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
     "breast_left": {
         "title": "LEFT BREAST",
         "options": [
-            {"label": "One Side", "key": 11, "value": {"both_sides": False}},
-            {"label": "Both Sides", "key": 12, "value": {"both_sides": True}},
+            {"label": "One", "key": 11, "value": {"both_sides": False}},
+            {"label": "Both", "key": 12, "value": {"both_sides": True}},
         ],
         "default_index": 0,
         "category_color": (102, 204, 102),
         "category": "feeding",
         "api_action": "baby_basics.log_feeding",
         "base_params": {"type": "breast", "started_side": "left"},
-        "confirmation_label": "Left breast logged",
+        "confirmation_label": "Fed L",
         "confirmation_icon": "breast_left",
         "resource_type": "feedings",
         "column": 0,
@@ -83,15 +91,15 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
     "breast_right": {
         "title": "RIGHT BREAST",
         "options": [
-            {"label": "One Side", "key": 11, "value": {"both_sides": False}},
-            {"label": "Both Sides", "key": 12, "value": {"both_sides": True}},
+            {"label": "One", "key": 11, "value": {"both_sides": False}},
+            {"label": "Both", "key": 12, "value": {"both_sides": True}},
         ],
         "default_index": 0,
         "category_color": (102, 204, 102),
         "category": "feeding",
         "api_action": "baby_basics.log_feeding",
         "base_params": {"type": "breast", "started_side": "right"},
-        "confirmation_label": "Right breast logged",
+        "confirmation_label": "Fed R",
         "confirmation_icon": "breast_right",
         "resource_type": "feedings",
         "column": 0,
@@ -100,7 +108,7 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
         "title": "BOTTLE",
         "options": [
             {"label": "Formula", "key": 11, "value": {"source": "formula"}},
-            {"label": "Breast Milk", "key": 12, "value": {"source": "breast_milk"}},
+            {"label": "Brst Milk", "key": 12, "value": {"source": "breast_milk"}},
             {"label": "Skip", "key": 13, "value": {}},
         ],
         "default_index": 0,
@@ -108,7 +116,7 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
         "category": "feeding",
         "api_action": "baby_basics.log_feeding",
         "base_params": {"type": "bottle"},
-        "confirmation_label": "Bottle logged",
+        "confirmation_label": "Bottle",
         "confirmation_icon": "bottle",
         "resource_type": "feedings",
         "column": 0,
@@ -126,7 +134,7 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
         "category": "diaper",
         "api_action": "baby_basics.log_diaper",
         "base_params": {"type": "poop"},
-        "confirmation_label": "Poop logged",
+        "confirmation_label": "Poop",
         "confirmation_icon": "diaper_poop",
         "resource_type": "diapers",
         "column": 1,
@@ -144,7 +152,7 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
         "category": "diaper",
         "api_action": "baby_basics.log_diaper",
         "base_params": {"type": "both"},
-        "confirmation_label": "Pee + poop logged",
+        "confirmation_label": "Pee+Poop",
         "confirmation_icon": "diaper_both",
         "resource_type": "diapers",
         "column": 1,
@@ -161,7 +169,7 @@ _ICON_TO_DETAIL: dict[str, str] = {
 }
 
 # Instant actions: these icons log immediately without a detail screen
-_INSTANT_ACTIONS: set[str] = {"diaper_pee", "pump"}
+_INSTANT_ACTIONS: set[str] = {"diaper_pee"}
 
 # Key number to column mapping (for confirmation color fill)
 _KEY_TO_COLUMN: dict[int, int] = {
@@ -378,6 +386,32 @@ class MacropadController:
             self._device.set_screen_image(jpeg_bytes)
             return
 
+        if s.mode == "notes_submenu":
+            if render_notes_submenu is not None:
+                categories = [
+                    {"label": c.label, "icon": getattr(c, "icon", None)}
+                    for c in self.config.notes_categories
+                ]
+                jpeg_bytes = render_notes_submenu(categories)
+            else:
+                jpeg_bytes = get_key_grid_bytes({})
+            self._screen_jpeg = jpeg_bytes
+            self._device.set_screen_image(jpeg_bytes)
+            return
+
+        if s.mode == "settings":
+            if render_settings_screen is not None:
+                jpeg_bytes = render_settings_screen(
+                    timer_seconds=s.timer_seconds,
+                    celebration_style=s.celebration_style,
+                    skip_breast_detail=s.skip_breast_detail,
+                )
+            else:
+                jpeg_bytes = get_key_grid_bytes({})
+            self._screen_jpeg = jpeg_bytes
+            self._device.set_screen_image(jpeg_bytes)
+            return
+
         # Default: home_grid (also fallback for expired timers)
         if s.mode != "home_grid":
             s.return_home()
@@ -548,8 +582,38 @@ class MacropadController:
             self.refresh_display()
             return
 
-        # TODO: implement individual settings controls (timer cycle, skip breast toggle, etc.)
-        logger.debug("Settings: key %d (not yet implemented)", key)
+        # Key 11 (col 0, top): Cycle timer duration
+        if key == 11:
+            timer_options = [5, 7, 10, 15]
+            try:
+                idx = timer_options.index(self._state.timer_seconds)
+                self._state.timer_seconds = timer_options[(idx + 1) % len(timer_options)]
+            except ValueError:
+                self._state.timer_seconds = timer_options[0]
+            logger.info("Settings: timer → %ds", self._state.timer_seconds)
+            self.refresh_display()
+            return
+
+        # Key 12 (col 1, top): Cycle celebration style
+        if key == 12:
+            styles = ["color_fill", "none"]
+            try:
+                idx = styles.index(self._state.celebration_style)
+                self._state.celebration_style = styles[(idx + 1) % len(styles)]
+            except ValueError:
+                self._state.celebration_style = styles[0]
+            logger.info("Settings: celebration → %s", self._state.celebration_style)
+            self.refresh_display()
+            return
+
+        # Key 13 (col 2, top): Toggle skip breast detail
+        if key == 13:
+            self._state.skip_breast_detail = not self._state.skip_breast_detail
+            logger.info("Settings: skip breast → %s", self._state.skip_breast_detail)
+            self.refresh_display()
+            return
+
+        logger.debug("Settings: key %d unmapped", key)
 
     # --- Action execution ---
 
@@ -611,11 +675,11 @@ class MacropadController:
         icon_name = button.icon
         if icon_name == "diaper_pee":
             category = "diaper"
-            label = "Pee logged"
+            label = "Pee"
             resource_type = "diapers"
         elif icon_name == "pump":
             category = "pump"
-            label = "Pump logged"
+            label = "Pump"
             resource_type = "notes"
         else:
             category = "feeding"
@@ -776,9 +840,17 @@ class MacropadController:
 
             logger.info("Sleep started: %s", sleep_id)
         except (BabyBasicsAPIError, ConnectionError, Exception) as e:
-            logger.warning("Failed to start sleep: %s", e)
+            logger.warning("Failed to start sleep via API, entering sleep mode locally: %s", e)
             self.queue.enqueue("baby_basics.toggle_sleep", {})
+            # Enter sleep mode locally even if API fails — the retry queue
+            # will sync when connectivity returns.
+            self._state.enter_sleep_mode(
+                sleep_id="pending",
+                start_time=datetime.now(timezone.utc).isoformat(),
+            )
             self._flash_led_queued()
+            self._device.set_brightness(10)
+            self.refresh_display()
 
     def _handle_wake_up(self) -> None:
         """End the active sleep from sleep mode."""
@@ -1031,8 +1103,8 @@ class MacropadController:
         def _pulse():
             r, g, b = CATEGORY_COLORS["sleep_start"]
             for _ in range(3):
-                self._device.set_led_brightness(50)
                 self._device.set_led_color(r, g, b)
+                self._device.set_led_brightness(50)
                 time.sleep(0.3)
                 self._device.turn_off_leds()
                 time.sleep(0.2)
@@ -1045,8 +1117,8 @@ class MacropadController:
 
         def _burst():
             r, g, b = CATEGORY_COLORS["sleep_end"]
-            self._device.set_led_brightness(100)
             self._device.set_led_color(r, g, b)
+            self._device.set_led_brightness(100)
             time.sleep(0.4)
             for level in (80, 60, 40, 20, 0):
                 self._device.set_led_brightness(level)
@@ -1062,8 +1134,8 @@ class MacropadController:
         def _beat():
             r, g, b = CATEGORY_COLORS["queued"]
             for _ in range(3):
-                self._device.set_led_brightness(55)
                 self._device.set_led_color(r, g, b)
+                self._device.set_led_brightness(55)
                 time.sleep(0.5)
                 self._device.turn_off_leds()
                 time.sleep(0.3)
@@ -1077,8 +1149,8 @@ class MacropadController:
         def _flash():
             r, g, b = CATEGORY_COLORS["error"]
             for _ in range(3):
-                self._device.set_led_brightness(80)
                 self._device.set_led_color(r, g, b)
+                self._device.set_led_brightness(80)
                 time.sleep(0.2)
                 self._device.turn_off_leds()
                 time.sleep(0.1)
@@ -1102,8 +1174,9 @@ class MacropadController:
             my_gen = self._led_flash_gen
 
         def _do_flash():
-            self._device.set_led_brightness(brightness)
+            # Color BEFORE brightness: load RGB data first, then enable output
             self._device.set_led_color(r, g, b)
+            self._device.set_led_brightness(brightness)
             time.sleep(duration)
             # Only turn off if no newer flash has started
             with self._led_lock:

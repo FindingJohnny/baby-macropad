@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 CACHE_DIR = Path.home() / ".baby-macropad" / "cache"
 
 # Confirmation screen duration (seconds)
-CONFIRMATION_DURATION = 2.0
+CONFIRMATION_DURATION = 5.0
 
 # --- Category colors for LED feedback ---
 CATEGORY_COLORS = {
@@ -226,6 +226,10 @@ class MacropadController:
         # Button debounce: track last press time per key
         self._last_key_press: dict[int, float] = {}
         self._debounce_seconds = 0.3
+
+        # LED flash generation counter — newer flashes cancel older ones
+        self._led_flash_gen = 0
+        self._led_lock = threading.Lock()
 
         # Device (try real, fall back to stub)
         self._device = StreamDockDevice()
@@ -941,9 +945,9 @@ class MacropadController:
     # --- Display tick loop ---
 
     def _display_tick_loop(self) -> None:
-        """10-second tick for timer management and display updates."""
+        """1-second tick for timer countdown, auto-dismiss, and display updates."""
         while not self._shutdown.is_set():
-            self._shutdown.wait(10)
+            self._shutdown.wait(1)
             if self._shutdown.is_set():
                 break
 
@@ -957,18 +961,21 @@ class MacropadController:
                 self.refresh_display()
                 continue
 
-            # Detail screen timer expiry — auto-commit with default
-            if s.mode == "detail" and s.detail_timer_expires > 0 and now >= s.detail_timer_expires:
-                logger.info("Detail timer expired")
-                self._commit_detail_default()
+            # Detail screen: refresh countdown every tick, auto-commit on expiry
+            if s.mode == "detail":
+                if s.detail_timer_expires > 0 and now >= s.detail_timer_expires:
+                    logger.info("Detail timer expired")
+                    self._commit_detail_default()
+                else:
+                    self.refresh_display()
                 continue
 
-            # Sleep mode: update elapsed timer display
+            # Sleep mode: update elapsed timer display (every tick)
             if s.mode == "sleep_mode":
                 self.refresh_display()
                 continue
 
-            # Brightness schedule check
+            # Brightness schedule check (only on home_grid, once per tick)
             self._check_brightness_schedule()
 
     def _check_brightness_schedule(self) -> None:
@@ -1017,6 +1024,10 @@ class MacropadController:
 
     def _flash_led_sleep_start(self) -> None:
         """Blue triple pulse for sleep start."""
+        with self._led_lock:
+            self._led_flash_gen += 1
+            my_gen = self._led_flash_gen
+
         def _pulse():
             r, g, b = CATEGORY_COLORS["sleep_start"]
             for _ in range(3):
@@ -1029,12 +1040,14 @@ class MacropadController:
 
     def _flash_led_wake(self) -> None:
         """Warm white burst for wake up."""
+        with self._led_lock:
+            self._led_flash_gen += 1
+
         def _burst():
             r, g, b = CATEGORY_COLORS["sleep_end"]
             self._device.set_led_brightness(100)
             self._device.set_led_color(r, g, b)
             time.sleep(0.4)
-            # Fade out
             for level in (80, 60, 40, 20, 0):
                 self._device.set_led_brightness(level)
                 time.sleep(0.12)
@@ -1043,6 +1056,9 @@ class MacropadController:
 
     def _flash_led_queued(self) -> None:
         """Amber triple beat for queued/offline."""
+        with self._led_lock:
+            self._led_flash_gen += 1
+
         def _beat():
             r, g, b = CATEGORY_COLORS["queued"]
             for _ in range(3):
@@ -1055,6 +1071,9 @@ class MacropadController:
 
     def _flash_led_error(self) -> None:
         """Red triple flash for error."""
+        with self._led_lock:
+            self._led_flash_gen += 1
+
         def _flash():
             r, g, b = CATEGORY_COLORS["error"]
             for _ in range(3):
@@ -1073,12 +1092,23 @@ class MacropadController:
     def _flash_led(
         self, r: int, g: int, b: int, brightness: int = 50, duration: float = 0.5
     ) -> None:
-        """Flash the LED ring with a single color, then turn off."""
+        """Flash the LED ring with a single color, then turn off.
+
+        Uses a generation counter so newer flashes cancel older ones —
+        prevents the acknowledge flash from killing the category flash.
+        """
+        with self._led_lock:
+            self._led_flash_gen += 1
+            my_gen = self._led_flash_gen
+
         def _do_flash():
             self._device.set_led_brightness(brightness)
             self._device.set_led_color(r, g, b)
             time.sleep(duration)
-            self._device.turn_off_leds()
+            # Only turn off if no newer flash has started
+            with self._led_lock:
+                if self._led_flash_gen == my_gen:
+                    self._device.turn_off_leds()
         threading.Thread(target=_do_flash, daemon=True).start()
 
     # --- Sync callbacks ---

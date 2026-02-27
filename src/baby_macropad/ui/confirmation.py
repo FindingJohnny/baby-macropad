@@ -73,45 +73,37 @@ def render_confirmation(
                 fill=fill_color,
             )
 
-    # Center content: icon + action_label + context_line
-    label_font = _get_font(22)
-    context_font = _get_font(14)
-    icon_size = 56
+    # Content layout: icon in top cell, label in middle cell, context in bottom cell
+    # All within the highlighted column (grid-aligned celebration)
+    label_font = _get_font(14)
+    context_font = _get_font(11)
+    icon_size = 36
 
-    # Calculate vertical layout of centered content
-    label_bbox = draw.textbbox((0, 0), action_label, font=label_font)
-    label_h = label_bbox[3] - label_bbox[1]
-    context_bbox = draw.textbbox((0, 0), context_line, font=context_font)
-    context_h = context_bbox[3] - context_bbox[1]
+    col = max(0, min(4, column_index))
 
-    gap = 8
-    total_h = icon_size + gap + label_h + gap + context_h
-    top_y = (SCREEN_H - total_h) // 2
-    center_x = SCREEN_W // 2
-
-    # Icon (tinted Tabler asset)
-    tinted = _load_and_tint(icon_name, category_color, icon_size)
+    # Draw icon centered in top cell of the column
+    tinted = _load_and_tint(icon_name, (255, 255, 255), icon_size)
     if tinted:
-        ix = center_x - icon_size // 2
-        img.paste(tinted, (ix, top_y), tinted)
+        ix = VIS_COL_X[col] + (VIS_COL_W[col] - icon_size) // 2
+        iy = VIS_ROW_Y[0] + (VIS_ROW_H[0] - icon_size) // 2
+        img.paste(tinted, (ix, iy), tinted)
 
-    # Action label
+    # Draw action label centered in middle cell of the column
+    label_bbox = draw.textbbox((0, 0), action_label, font=label_font)
     label_w = label_bbox[2] - label_bbox[0]
-    draw.text(
-        (center_x - label_w // 2, top_y + icon_size + gap),
-        action_label,
-        fill=(255, 255, 255),
-        font=label_font,
-    )
+    label_h = label_bbox[3] - label_bbox[1]
+    lx = VIS_COL_X[col] + (VIS_COL_W[col] - label_w) // 2
+    ly = VIS_ROW_Y[1] + (VIS_ROW_H[1] - label_h) // 2
+    draw.text((lx, ly), action_label, fill=(255, 255, 255), font=label_font)
 
-    # Context line
-    context_w = context_bbox[2] - context_bbox[0]
-    draw.text(
-        (center_x - context_w // 2, top_y + icon_size + gap + label_h + gap),
-        context_line,
-        fill=_SECONDARY_TEXT,
-        font=context_font,
-    )
+    # Draw context line centered in bottom cell of the column
+    if context_line:
+        context_bbox = draw.textbbox((0, 0), context_line, font=context_font)
+        context_w = context_bbox[2] - context_bbox[0]
+        context_h = context_bbox[3] - context_bbox[1]
+        cx = VIS_COL_X[col] + (VIS_COL_W[col] - context_w) // 2
+        cy = VIS_ROW_Y[2] + (VIS_ROW_H[2] - context_h) // 2
+        draw.text((cx, cy), context_line, fill=_SECONDARY_TEXT, font=context_font)
 
     # UNDO button — bottom-left (key 1 = col 0, row 2)
     undo_font = _get_font(12)

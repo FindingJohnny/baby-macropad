@@ -84,26 +84,25 @@ def render_detail_screen(
     img = Image.new("RGB", (SCREEN_W, SCREEN_H), BG_COLOR)
     draw = ImageDraw.Draw(img)
 
-    title_font = _get_font(18)
-    option_font = _get_font(14)
-    timer_font = _get_font(16)
+    title_font = _get_font(16)
+    option_font = _get_font(12)
+    timer_font = _get_font(14)
     back_font = _get_font(12)
 
-    # Title — top center (above the grid, spanning columns 1-3)
+    # Title — centered in middle row (spans columns 1-3)
     tb = draw.textbbox((0, 0), title, font=title_font)
     tw = tb[2] - tb[0]
-    # Center across columns 1-3 (indices 1..3)
     center_x = (VIS_COL_X[1] + VIS_COL_X[3] + VIS_COL_W[3]) // 2
-    draw.text((center_x - tw // 2, VIS_ROW_Y[0] + 20), title, fill=(255, 255, 255), font=title_font)
+    ty = VIS_ROW_Y[1] + (VIS_ROW_H[1] - (tb[3] - tb[1])) // 2
+    draw.text((center_x - tw // 2, ty), title, fill=(255, 255, 255), font=title_font)
 
-    # Timer countdown — top-right (key 15 area = col 4, row 0)
+    # Timer countdown — middle-right (key 10 area = col 4, row 1)
     timer_text = f"{timer_seconds}s"
-    timer_box = _draw_card(draw, 4, 0, fill=_darken(category_color, 0.15), outline=None)
+    timer_box = _draw_card(draw, 4, 1, fill=_darken(category_color, 0.15), outline=None)
     _draw_centered_text(draw, timer_text, timer_box, category_color, timer_font)
 
-    # Option cards — top row, columns based on key_num mapping
+    # Option cards — top row (keys 11-14 = row 0, cols 0-3)
     for opt in options:
-        # key_num 11-14 map to top row columns 0-3
         key_num = opt.get("key_num", 11)
         col = key_num - 11
         if col < 0 or col > 3:
@@ -113,12 +112,10 @@ def render_detail_screen(
         label = opt.get("label", "?")
 
         if selected:
-            # Bright filled card
-            card_box = _draw_card(draw, col, 1, fill=category_color, outline=None)
+            card_box = _draw_card(draw, col, 0, fill=category_color, outline=None)
             _draw_centered_text(draw, label, card_box, (255, 255, 255), option_font)
         else:
-            # Dark card with colored border
-            card_box = _draw_card(draw, col, 1, fill=_darken(category_color, 0.1), outline=category_color)
+            card_box = _draw_card(draw, col, 0, fill=_darken(category_color, 0.1), outline=category_color)
             _draw_centered_text(draw, label, card_box, category_color, option_font)
 
     # BACK button — bottom-left (key 1 = col 0, row 2)

@@ -19,186 +19,43 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
+# --- Framework imports (canonical sources) ---
+from .framework.icon_cache import load_and_tint as _load_and_tint
+from .framework.icon_cache import load_composite as _load_two_icon_composite
+from .framework.primitives import (
+    BACK_BUTTON_BG,
+    BG_COLOR,
+    CARD_MARGIN,
+    CARD_RADIUS,
+    CELL_W,
+    COLS,
+    ICON_ASSETS,
+    ICON_COLORS,
+    ICON_LABELS,
+    ROWS,
+    SCREEN_H,
+    SCREEN_W,
+    SECONDARY_TEXT,
+    VIS_COL_W,
+    VIS_COL_X,
+    VIS_ROW_H,
+    VIS_ROW_Y,
+    darken as _darken,
+    key_to_grid,
+)
+from .framework.text_engine import get_font
+
 logger = logging.getLogger(__name__)
-
-# M18 screen dimensions
-SCREEN_W = 480
-SCREEN_H = 272
-COLS = 5
-ROWS = 3
-CELL_W = SCREEN_W // COLS  # 96
-
-# Visible area per button — measured via calibration patterns.
-# The physical bezels obscure ~12px on each side horizontally and
-# ~15-20px on each side vertically. These are the pixel rectangles
-# actually visible through the button cutouts.
-#
-# Columns (X ranges): C0=11-83, C1=107-179, C2=203-275, C3=299-371, C4=395-467
-# Rows (Y ranges):    R0=10-70,  R1=110-170, R2=200-270
-VIS_COL_X = [11, 107, 203, 299, 395]  # Left edge of visible area per column
-VIS_COL_W = [72, 72, 72, 72, 72]      # Visible width per column
-VIS_ROW_Y = [10, 110, 200]            # Top edge of visible area per row
-VIS_ROW_H = [60, 60, 70]              # Visible height per row
-
-BG_COLOR = (28, 28, 30)  # Near-black, matches iOS bbBackground dark
-
-# Shared design tokens — used by all renderers
-SECONDARY_TEXT = (142, 142, 147)  # iOS secondaryLabel equivalent
-CARD_RADIUS = 6
-CARD_MARGIN = 2
-BACK_BUTTON_BG = (38, 38, 40)
-
-# Icon asset directory (relative to package root)
-_ASSETS_DIR = Path(__file__).parent.parent.parent.parent / "assets" / "icons"
-
-# Category colors (same as iOS design system)
-ICON_COLORS = {
-    "breast_left": (102, 204, 102),   # Soft green
-    "breast_right": (102, 204, 102),
-    "bottle": (102, 204, 102),
-    "pump": (102, 204, 102),
-    "diaper_pee": (204, 170, 68),     # Warm amber
-    "diaper_poop": (204, 170, 68),
-    "diaper_both": (204, 170, 68),
-    "sleep": (102, 153, 204),         # Soft blue
-    "note": (153, 153, 153),          # Warm gray
-    "settings": (200, 200, 200),      # Neutral gray
-    "light": (255, 204, 0),           # Yellow
-    "fan": (0, 204, 204),             # Cyan
-    "sound": (180, 180, 180),         # Light gray
-    "scene_off": (255, 255, 255),     # White
-}
-
-# Map icon names to PNG asset files (same Tabler icons as iOS app).
-# String values map to a single asset file. Tuple values trigger composite
-# rendering via _load_two_icon_composite (first icon top-left, second bottom-right).
-ICON_ASSETS: dict[str, str | tuple[str, str]] = {
-    "breast_left": "letter_l",
-    "breast_right": "letter_r",
-    "bottle": "milk",
-    "pump": "pump",
-    "diaper_pee": "diaper",
-    "diaper_poop": "poo",
-    "diaper_both": ("poo", "diaper"),
-    "sleep": "moon",
-    "note": "note",
-    "settings": "gear",
-}
-
-# Labels shown below the icon
-ICON_LABELS = {
-    "breast_left": "LEFT",
-    "breast_right": "RIGHT",
-    "bottle": "BOTTLE",
-    "pump": "PUMP",
-    "diaper_pee": "PEE",
-    "diaper_poop": "POOP",
-    "diaper_both": "BOTH",
-    "sleep": "SLEEP",
-    "note": "NOTE",
-    "settings": "SETTINGS",
-    "light": "LIGHT",
-    "fan": "FAN",
-    "sound": "SOUND",
-    "scene_off": "OFF",
-}
-
-# Cache loaded + tinted icons
-_icon_cache: dict[str, Image.Image] = {}
 
 
 def _get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    font_paths = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/System/Library/Fonts/Helvetica.ttc",
-    ]
-    for path in font_paths:
-        if Path(path).exists():
-            try:
-                return ImageFont.truetype(path, size)
-            except OSError:
-                continue
-    return ImageFont.load_default()
+    """Load a bold font at the given size. Delegates to text_engine.get_font."""
+    return get_font(size, bold=True)
 
 
 def _key_position(key_num: int) -> tuple[int, int] | None:
-    """Key number (1-15) to grid (col, row).
-
-    M18 physical-to-key mapping (verified by testing):
-      Top row:    KEY_11  KEY_12  KEY_13  KEY_14  KEY_15
-      Middle row: KEY_6   KEY_7   KEY_8   KEY_9   KEY_10
-      Bottom row: KEY_1   KEY_2   KEY_3   KEY_4   KEY_5
-
-    Top and bottom rows are swapped vs naive numbering.
-    """
-    if key_num < 1 or key_num > 15:
-        return None
-    # Map key number to physical grid position
-    if 1 <= key_num <= 5:
-        # Keys 1-5 are on the BOTTOM row (row 2)
-        return (key_num - 1, 2)
-    elif 6 <= key_num <= 10:
-        # Keys 6-10 are in the MIDDLE row (row 1)
-        return (key_num - 6, 1)
-    else:
-        # Keys 11-15 are on the TOP row (row 0)
-        return (key_num - 11, 0)
-
-
-def _darken(color: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
-    return (int(color[0] * factor), int(color[1] * factor), int(color[2] * factor))
-
-
-def _load_and_tint(asset_name: str, color: tuple[int, int, int], size: int) -> Image.Image | None:
-    """Load a white PNG icon, tint it with the given color, and resize."""
-    cache_key = f"{asset_name}_{color}_{size}"
-    if cache_key in _icon_cache:
-        return _icon_cache[cache_key]
-
-    png_path = _ASSETS_DIR / f"{asset_name}.png"
-    if not png_path.exists():
-        logger.warning("Icon asset not found: %s", png_path)
-        return None
-
-    # Load white icon with alpha
-    icon = Image.open(png_path).convert("RGBA")
-    icon = icon.resize((size, size), Image.LANCZOS)
-
-    # Tint: multiply white pixels by color, preserving alpha
-    r, g, b = color
-    pixels = icon.load()
-    for y in range(icon.height):
-        for x in range(icon.width):
-            pr, pg, pb, pa = pixels[x, y]
-            if pa > 0:
-                # Scale the white pixel by the target color
-                pixels[x, y] = (
-                    pr * r // 255,
-                    pg * g // 255,
-                    pb * b // 255,
-                    pa,
-                )
-
-    _icon_cache[cache_key] = icon
-    return icon
-
-
-def _load_two_icon_composite(
-    asset_a: str,
-    asset_b: str,
-    color: tuple[int, int, int],
-    size: int,
-) -> Image.Image | None:
-    """Render two icons as a 2x2 quadrant composite (a top-left, b bottom-right)."""
-    half = size // 2
-    a = _load_and_tint(asset_a, color, half)
-    b = _load_and_tint(asset_b, color, half)
-    if a is None or b is None:
-        return None
-    composite = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    composite.paste(a, (0, 0), a)
-    composite.paste(b, (half, half), b)
-    return composite
+    """Key number (1-15) to grid (col, row). Delegates to primitives.key_to_grid."""
+    return key_to_grid(key_num)
 
 
 def render_key_grid(

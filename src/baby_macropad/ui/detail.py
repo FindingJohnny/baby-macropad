@@ -12,14 +12,22 @@ import logging
 
 from PIL import Image, ImageDraw
 
-from .icons import BG_COLOR, SCREEN_H, SCREEN_W, VIS_COL_W, VIS_COL_X, VIS_ROW_H, VIS_ROW_Y, _get_font
+from .icons import (
+    BACK_BUTTON_BG,
+    BG_COLOR,
+    CARD_MARGIN,
+    CARD_RADIUS,
+    SCREEN_H,
+    SCREEN_W,
+    SECONDARY_TEXT,
+    VIS_COL_W,
+    VIS_COL_X,
+    VIS_ROW_H,
+    VIS_ROW_Y,
+    _get_font,
+)
 
 logger = logging.getLogger(__name__)
-
-# Card styling
-_CARD_RADIUS = 6
-_CARD_MARGIN = 2
-_SECONDARY_TEXT = (142, 142, 147)
 
 
 def _draw_card(
@@ -30,13 +38,13 @@ def _draw_card(
     outline: tuple[int, int, int] | None,
 ) -> tuple[int, int, int, int]:
     """Draw a rounded rect card in the given grid cell. Returns the bounding box."""
-    x = VIS_COL_X[col] + _CARD_MARGIN
-    y = VIS_ROW_Y[row] + _CARD_MARGIN
-    w = VIS_COL_W[col] - _CARD_MARGIN * 2
-    h = VIS_ROW_H[row] - _CARD_MARGIN * 2
+    x = VIS_COL_X[col] + CARD_MARGIN
+    y = VIS_ROW_Y[row] + CARD_MARGIN
+    w = VIS_COL_W[col] - CARD_MARGIN * 2
+    h = VIS_ROW_H[row] - CARD_MARGIN * 2
     draw.rounded_rectangle(
         [x, y, x + w, y + h],
-        radius=_CARD_RADIUS,
+        radius=CARD_RADIUS,
         fill=fill,
         outline=outline,
         width=2 if outline else 0,
@@ -98,7 +106,7 @@ def render_detail_screen(
 
     # Timer countdown — middle-right (key 10 area = col 4, row 1)
     timer_text = f"{timer_seconds}s"
-    timer_box = _draw_card(draw, 4, 1, fill=_darken(category_color, 0.15), outline=None)
+    timer_box = _draw_card(draw, 4, 1, fill=_darken(category_color, 0.30), outline=None)
     _draw_centered_text(draw, timer_text, timer_box, category_color, timer_font)
 
     # Option cards — top row (keys 11-14 = row 0, cols 0-3)
@@ -119,8 +127,8 @@ def render_detail_screen(
             _draw_centered_text(draw, label, card_box, category_color, option_font)
 
     # BACK button — bottom-left (key 1 = col 0, row 2)
-    back_box = _draw_card(draw, 0, 2, fill=(38, 38, 40), outline=None)
-    _draw_centered_text(draw, "BACK", back_box, _SECONDARY_TEXT, back_font)
+    back_box = _draw_card(draw, 0, 2, fill=BACK_BUTTON_BG, outline=None)
+    _draw_centered_text(draw, "BACK", back_box, SECONDARY_TEXT, back_font)
 
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=90)

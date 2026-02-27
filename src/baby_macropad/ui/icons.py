@@ -42,6 +42,12 @@ VIS_ROW_H = [60, 60, 70]              # Visible height per row
 
 BG_COLOR = (28, 28, 30)  # Near-black, matches iOS bbBackground dark
 
+# Shared design tokens — used by all renderers
+SECONDARY_TEXT = (142, 142, 147)  # iOS secondaryLabel equivalent
+CARD_RADIUS = 6
+CARD_MARGIN = 2
+BACK_BUTTON_BG = (38, 38, 40)
+
 # Icon asset directory (relative to package root)
 _ASSETS_DIR = Path(__file__).parent.parent.parent.parent / "assets" / "icons"
 
@@ -67,9 +73,9 @@ ICON_COLORS = {
 # String values map to a single asset file. Tuple values trigger composite
 # rendering via _load_two_icon_composite (first icon top-left, second bottom-right).
 ICON_ASSETS: dict[str, str | tuple[str, str]] = {
-    "breast_left": "breast",
-    "breast_right": "breast",
-    "bottle": "bottle",
+    "breast_left": "letter_l",
+    "breast_right": "letter_r",
+    "bottle": "milk",
     "pump": "pump",
     "diaper_pee": "diaper",
     "diaper_poop": "poo",

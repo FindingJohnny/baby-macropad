@@ -13,22 +13,24 @@ import logging
 from PIL import Image, ImageDraw
 
 from .icons import (
+    BACK_BUTTON_BG,
     BG_COLOR,
+    CARD_MARGIN,
+    CARD_RADIUS,
+    ICON_ASSETS,
     SCREEN_H,
     SCREEN_W,
+    SECONDARY_TEXT,
     VIS_COL_W,
     VIS_COL_X,
     VIS_ROW_H,
     VIS_ROW_Y,
     _get_font,
     _load_and_tint,
+    _load_two_icon_composite,
 )
 
 logger = logging.getLogger(__name__)
-
-_SECONDARY_TEXT = (142, 142, 147)
-_CARD_RADIUS = 6
-_CARD_MARGIN = 2
 
 
 def _darken(color: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
@@ -82,7 +84,13 @@ def render_confirmation(
     col = max(0, min(4, column_index))
 
     # Draw icon centered in top cell of the column
-    tinted = _load_and_tint(icon_name, (255, 255, 255), icon_size)
+    # Resolve through ICON_ASSETS mapping (e.g. "breast_left" → "letter_l")
+    asset = ICON_ASSETS.get(icon_name, icon_name)
+    tinted = None
+    if isinstance(asset, tuple):
+        tinted = _load_two_icon_composite(asset[0], asset[1], (255, 255, 255), icon_size)
+    else:
+        tinted = _load_and_tint(asset, (255, 255, 255), icon_size)
     if tinted:
         ix = VIS_COL_X[col] + (VIS_COL_W[col] - icon_size) // 2
         iy = VIS_ROW_Y[0] + (VIS_ROW_H[0] - icon_size) // 2
@@ -96,25 +104,25 @@ def render_confirmation(
     ly = VIS_ROW_Y[1] + (VIS_ROW_H[1] - label_h) // 2
     draw.text((lx, ly), action_label, fill=(255, 255, 255), font=label_font)
 
-    # Draw context line centered in bottom cell of the column
+    # Draw context line centered across the full screen width (not column-constrained)
     if context_line:
         context_bbox = draw.textbbox((0, 0), context_line, font=context_font)
         context_w = context_bbox[2] - context_bbox[0]
         context_h = context_bbox[3] - context_bbox[1]
-        cx = VIS_COL_X[col] + (VIS_COL_W[col] - context_w) // 2
+        cx = (SCREEN_W - context_w) // 2
         cy = VIS_ROW_Y[2] + (VIS_ROW_H[2] - context_h) // 2
-        draw.text((cx, cy), context_line, fill=_SECONDARY_TEXT, font=context_font)
+        draw.text((cx, cy), context_line, fill=SECONDARY_TEXT, font=context_font)
 
     # UNDO button — bottom-left (key 1 = col 0, row 2)
     undo_font = _get_font(12)
-    ux = VIS_COL_X[0] + _CARD_MARGIN
-    uy = VIS_ROW_Y[2] + _CARD_MARGIN
-    uw = VIS_COL_W[0] - _CARD_MARGIN * 2
-    uh = VIS_ROW_H[2] - _CARD_MARGIN * 2
+    ux = VIS_COL_X[0] + CARD_MARGIN
+    uy = VIS_ROW_Y[2] + CARD_MARGIN
+    uw = VIS_COL_W[0] - CARD_MARGIN * 2
+    uh = VIS_ROW_H[2] - CARD_MARGIN * 2
     draw.rounded_rectangle(
         [ux, uy, ux + uw, uy + uh],
-        radius=6,
-        fill=(38, 38, 40),
+        radius=CARD_RADIUS,
+        fill=BACK_BUTTON_BG,
     )
     # Center "UNDO" in the card
     ub = draw.textbbox((0, 0), "UNDO", font=undo_font)
@@ -123,7 +131,7 @@ def render_confirmation(
     draw.text(
         (ux + (uw - utw) // 2, uy + (uh - uth) // 2),
         "UNDO",
-        fill=_SECONDARY_TEXT,
+        fill=SECONDARY_TEXT,
         font=undo_font,
     )
 

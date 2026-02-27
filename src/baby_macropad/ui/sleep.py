@@ -13,8 +13,10 @@ from PIL import Image, ImageDraw
 
 from .icons import (
     BG_COLOR,
+    ICON_COLORS,
     SCREEN_H,
     SCREEN_W,
+    SECONDARY_TEXT,
     VIS_COL_W,
     VIS_COL_X,
     VIS_ROW_H,
@@ -25,8 +27,7 @@ from .icons import (
 
 logger = logging.getLogger(__name__)
 
-_SLEEP_BLUE = (102, 153, 204)
-_SECONDARY_TEXT = (142, 142, 147)
+_SLEEP_BLUE = ICON_COLORS.get("sleep", (102, 153, 204))
 _DIM_SECONDARY = (90, 90, 94)
 
 
@@ -90,7 +91,7 @@ def render_sleep_mode(
     draw.text(
         (center_x - label_w // 2, top_y + icon_size + gap),
         label_text,
-        fill=_SECONDARY_TEXT,
+        fill=SECONDARY_TEXT,
         font=label_font,
     )
 

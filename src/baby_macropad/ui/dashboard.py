@@ -9,7 +9,7 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
-from .icons import BG_COLOR, SECONDARY_TEXT, SCREEN_H, SCREEN_W
+from .framework.primitives import BG_COLOR, SCREEN_H, SCREEN_W, SECONDARY_TEXT
 
 logger = logging.getLogger(__name__)
 

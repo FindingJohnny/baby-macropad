@@ -1,62 +1,81 @@
-"""Tests for icon generation and dashboard rendering."""
+"""Tests for icon grid rendering and dashboard rendering."""
 
+from io import BytesIO
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
-from baby_macropad.ui.icons import ICON_COLORS, ICON_LABELS, generate_all_icons, generate_icon
+from baby_macropad.ui.icons import (
+    ICON_COLORS,
+    ICON_LABELS,
+    get_key_grid_bytes,
+    render_key_grid,
+    save_key_grid,
+)
 from baby_macropad.ui.dashboard import render_dashboard, save_dashboard
 
 
-class TestIconGeneration:
-    def test_generate_icon_returns_correct_size(self):
-        img = generate_icon("breast_left")
-        assert img.size == (64, 64)
+class TestKeyGridRendering:
+    def _make_button(self, icon: str, label: str):
+        class FakeButton:
+            def __init__(self, icon: str, label: str):
+                self.icon = icon
+                self.label = label
+        return FakeButton(icon, label)
+
+    def test_render_empty_grid(self):
+        img = render_key_grid({})
+        assert img.size == (480, 272)
         assert img.mode == "RGB"
 
-    def test_generate_icon_for_all_known_types(self):
-        for icon_name in ICON_LABELS:
-            img = generate_icon(icon_name)
-            assert img.size == (64, 64), f"Failed for {icon_name}"
-
-    def test_generate_icon_unknown_name(self):
-        img = generate_icon("nonexistent")
-        assert img.size == (64, 64)
-
-    def test_generate_icon_custom_label(self):
-        img = generate_icon("breast_left", label="LEFT")
-        assert img.size == (64, 64)
-
-    def test_generate_all_icons(self, tmp_path: Path):
-        class FakeButton:
-            def __init__(self, icon: str, label: str):
-                self.icon = icon
-                self.label = label
-
+    def test_render_grid_with_buttons(self):
         buttons = {
-            1: FakeButton("breast_left", "Breast L"),
-            2: FakeButton("breast_right", "Breast R"),
-            9: FakeButton("sleep", "Sleep"),
+            11: self._make_button("breast_left", "LEFT"),
+            6: self._make_button("breast_right", "RIGHT"),
+            1: self._make_button("bottle", "BOTTLE"),
         }
-        paths = generate_all_icons(buttons, tmp_path / "icons")
-        assert len(paths) == 3
-        for key_num, path in paths.items():
-            assert path.exists()
-            img = Image.open(path)
-            assert img.size == (64, 64)
+        img = render_key_grid(buttons)
+        assert img.size == (480, 272)
 
-    def test_generate_all_icons_skips_empty_icon(self, tmp_path: Path):
-        class FakeButton:
-            def __init__(self, icon: str, label: str):
-                self.icon = icon
-                self.label = label
+    def test_get_key_grid_bytes_returns_jpeg(self):
+        buttons = {12: self._make_button("diaper_pee", "PEE")}
+        data = get_key_grid_bytes(buttons)
+        assert isinstance(data, bytes)
+        assert data[:2] == b'\xff\xd8'  # JPEG magic bytes
+        img = Image.open(BytesIO(data))
+        assert img.size == (480, 272)
 
-        buttons = {
-            1: FakeButton("", "No Icon"),
-        }
-        paths = generate_all_icons(buttons, tmp_path / "icons")
-        assert len(paths) == 0
+    def test_save_key_grid(self, tmp_path: Path):
+        buttons = {13: self._make_button("sleep", "SLEEP")}
+        path = save_key_grid(buttons, tmp_path / "grid.jpg")
+        assert path.exists()
+        img = Image.open(path)
+        assert img.size == (480, 272)
+
+    def test_render_all_icon_types(self):
+        """Verify all registered icon names render without error."""
+        for i, icon_name in enumerate(ICON_LABELS):
+            buttons = {11: self._make_button(icon_name, ICON_LABELS[icon_name])}
+            img = render_key_grid(buttons)
+            assert img.size == (480, 272), f"Failed for {icon_name}"
+
+    def test_render_with_runtime_state(self):
+        buttons = {13: self._make_button("sleep", "SLEEP")}
+        runtime_state = {13: "active:1h 30m"}
+        img = render_key_grid(buttons, runtime_state=runtime_state)
+        assert img.size == (480, 272)
+
+    def test_render_with_suggested_breast(self):
+        buttons = {11: self._make_button("breast_left", "LEFT")}
+        runtime_state = {11: "suggested"}
+        img = render_key_grid(buttons, runtime_state=runtime_state)
+        assert img.size == (480, 272)
+
+    def test_composite_icon_diaper_both(self):
+        buttons = {2: self._make_button("diaper_both", "BOTH")}
+        img = render_key_grid(buttons)
+        assert img.size == (480, 272)
 
 
 class TestDashboardRendering:

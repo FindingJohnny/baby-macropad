@@ -67,7 +67,7 @@ def test_load_minimal_config(minimal_yaml: Path):
     assert cfg.baby_basics.token == "bb_test_token"
     assert cfg.baby_basics.child_id == "abc-123"
     assert cfg.device.brightness == 80  # default
-    assert cfg.device.led_idle_color == (30, 0, 60)  # default
+    assert cfg.device.led_idle_color == (0, 0, 0)  # default (off — nursery dark)
     assert cfg.home_assistant.enabled is False
     assert cfg.buttons == {}
     assert cfg.dashboard.poll_interval_seconds == 60

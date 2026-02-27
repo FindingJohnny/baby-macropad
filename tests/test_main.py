@@ -27,23 +27,21 @@ def config_file(tmp_path: Path) -> Path:
           child_id: "child-uuid-123"
 
         buttons:
-          1:
-            label: "Breast L"
-            icon: "breast_left"
-            action: "baby_basics.log_feeding"
-            params:
-              type: "breast"
-              started_side: "left"
-          6:
-            label: "Pee"
+          12:
+            label: "PEE"
             icon: "diaper_pee"
             action: "baby_basics.log_diaper"
             params:
               type: "pee"
-          9:
-            label: "Sleep"
+            feedback:
+              success_led: [204, 170, 68]
+          13:
+            label: "SLEEP"
             icon: "sleep"
             action: "baby_basics.toggle_sleep"
+            params: {}
+            feedback:
+              success_led: [102, 153, 204]
           10:
             label: "Note"
             icon: "note"
@@ -127,15 +125,15 @@ def test_dispatch_ha_action_is_noop(controller: MacropadController):
 
 @respx.mock
 def test_key_press_success(controller: MacropadController):
-    respx.post(f"{BASE}/feedings").mock(
-        return_value=Response(201, json={"feeding": {"id": "f1"}})
+    respx.post(f"{BASE}/diapers").mock(
+        return_value=Response(201, json={"diaper": {"id": "d1"}})
     )
     respx.get(f"{BASE}/dashboard").mock(
         return_value=Response(200, json={"dashboard": {}})
     )
 
     controller._device.set_key_callback(controller._on_key_press)
-    controller._on_key_press(1, True)  # Breast L
+    controller._on_key_press(12, True)  # Pee (instant action, no detail screen)
 
     # Verify the API was called
     assert respx.routes[0].called
@@ -143,10 +141,10 @@ def test_key_press_success(controller: MacropadController):
 
 @respx.mock
 def test_key_press_offline_queues_event(controller: MacropadController):
-    respx.post(f"{BASE}/feedings").mock(side_effect=ConnectionError("No network"))
+    respx.post(f"{BASE}/diapers").mock(side_effect=ConnectionError("No network"))
     respx.get(f"{BASE}/dashboard").mock(side_effect=ConnectionError("No network"))
 
-    controller._on_key_press(1, True)  # Breast L
+    controller._on_key_press(12, True)  # Pee (instant action)
 
     # Wait briefly for background refresh thread to finish
     import time
@@ -154,21 +152,21 @@ def test_key_press_offline_queues_event(controller: MacropadController):
 
     assert controller.queue.count() >= 1
     events = controller.queue.peek()
-    assert events[0].action == "baby_basics.log_feeding"
-    assert events[0].params == {"type": "breast", "started_side": "left"}
+    assert events[0].action == "baby_basics.log_diaper"
+    assert events[0].params == {"type": "pee"}
 
 
 def test_key_release_ignored(controller: MacropadController):
     """Key release events should not trigger actions."""
     controller._dispatch_action = MagicMock()
-    controller._on_key_press(1, False)  # Release
+    controller._on_key_press(12, False)  # Release
     controller._dispatch_action.assert_not_called()
 
 
 def test_unconfigured_key_ignored(controller: MacropadController):
     """Pressing a key not in the config should be a no-op."""
     controller._dispatch_action = MagicMock()
-    controller._on_key_press(15, True)  # Key 15 not in test config
+    controller._on_key_press(5, True)  # Key 5 not in test config
     controller._dispatch_action.assert_not_called()
 
 

@@ -11,6 +11,8 @@ Protocol reverse-engineered from Bitfocus Companion + strace of C library:
   - Wake: CRT + DIS [0x44,0x49,0x53]
   - Brightness: CRT + LIG [0x4C,0x49,0x47,0,0,level]
   - Background image: CRT + LOG [0x4C,0x4F,0x47,size_be32,0x01] + JPEG chunks
+  - LED color: CRT + SETLB [0x53,0x45,0x54,0x4C,0x42] + [R,G,B]*24
+  - LED reset: CRT + DELED [0x44,0x45,0x4C,0x45,0x44]
   - Button events: data[9]=key_code, data[10]=state (0x01=press, 0x02=release)
 
 Hardware: VSD Inside / HOTSPOTEKUSB Stream Dock (VID=0x5548, PID=0x1000)
@@ -25,6 +27,7 @@ import logging
 import os
 import select
 import threading
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -42,6 +45,9 @@ _CRT_PREFIX = bytes([0x43, 0x52, 0x54, 0x00, 0x00])
 _CMD_CONNECT = bytes([0x43, 0x4F, 0x4E, 0x4E, 0x45, 0x43, 0x54])  # "CONNECT"
 _CMD_WAKE = bytes([0x44, 0x49, 0x53])  # "DIS"
 _CMD_REFRESH = bytes([0x53, 0x54, 0x50])  # "STP"
+_CMD_SETLB = bytes([0x53, 0x45, 0x54, 0x4C, 0x42])  # "SETLB" — LED ring color
+_CMD_DELED = bytes([0x44, 0x45, 0x4C, 0x45, 0x44])  # "DELED" — LED ring reset
+_LED_COUNT = 24  # Number of RGB LEDs around the dial
 
 
 def _build_cmd(payload: bytes) -> bytes:
@@ -105,7 +111,15 @@ class StreamDockDevice:
     All I/O (heartbeat, images, button reads, brightness) goes through
     raw /dev/hidraw to avoid the SDK's C library reader thread which
     causes firmware USB disconnects after ~60s.
+
+    Includes USB reconnection logic: if the device disconnects (cable bump,
+    power glitch), the driver detects the I/O error, closes the fd, waits
+    for the device to re-enumerate, re-opens it, re-initializes, and
+    re-sends the cached screen image.
     """
+
+    _MAX_RECONNECT_ATTEMPTS = 5
+    _RECONNECT_DELAY_SECONDS = 3.0
 
     def __init__(self, vid: int = DEFAULT_VID, pid: int = DEFAULT_PID) -> None:
         self._vid = vid
@@ -117,6 +131,11 @@ class StreamDockDevice:
         self._reader_thread: threading.Thread | None = None
         self._reader_stop = threading.Event()
         self._write_lock = threading.Lock()
+        # Cached state for reconnection
+        self._screen_jpeg: bytes | None = None
+        self._brightness: int = 80
+        # Reconnection state
+        self._reconnecting = threading.Event()  # set = reconnect in progress
 
     @property
     def connected(self) -> bool:
@@ -158,10 +177,14 @@ class StreamDockDevice:
             return False
 
     def _raw_write(self, data: bytes) -> None:
-        """Write raw data to hidraw (thread-safe)."""
-        if self._hidraw_fd is not None:
-            with self._write_lock:
-                os.write(self._hidraw_fd, data)
+        """Write raw data to hidraw (thread-safe).
+
+        Raises OSError if the write fails (callers decide whether to reconnect).
+        """
+        if self._hidraw_fd is None or self._reconnecting.is_set():
+            return
+        with self._write_lock:
+            os.write(self._hidraw_fd, data)
 
     def _cleanup_fd(self) -> None:
         """Close the hidraw file descriptor."""
@@ -174,7 +197,7 @@ class StreamDockDevice:
 
     def close(self) -> None:
         """Clean shutdown."""
-        self._reader_stop.set()
+        self._reader_stop.set()  # Also prevents reconnect loop from continuing
         if self._reader_thread and self._reader_thread.is_alive():
             self._reader_thread.join(timeout=2.0)
 
@@ -184,9 +207,9 @@ class StreamDockDevice:
 
     def set_brightness(self, level: int) -> None:
         """Set screen brightness (0-100) via CRT+LIG command."""
-        clamped = max(0, min(100, level))
+        self._brightness = max(0, min(100, level))
         # Apply gamma curve (matches Companion's setBrightness)
-        y = pow(clamped / 100, 0.75)
+        y = pow(self._brightness / 100, 0.75)
         brightness = round(y * 100)
         try:
             self._raw_write(_build_cmd(bytes([0x4C, 0x49, 0x47, 0x00, 0x00, brightness])))
@@ -201,6 +224,7 @@ class StreamDockDevice:
           2. JPEG data in 1024-byte chunks: [0x00] + chunk, padded to 1025
           3. STP refresh: CRT + [S,T,P] to commit the image to display
         """
+        self._screen_jpeg = jpeg_data  # Cache for reconnection
         if self._hidraw_fd is None:
             return
         # Hold lock for entire sequence (header + chunks + STP) to prevent
@@ -242,8 +266,27 @@ class StreamDockDevice:
             logger.exception("Failed to send screen image from %s", image_path)
 
     def set_led_color(self, r: int, g: int, b: int) -> None:
-        """Set LED ring color (no-op until CRT LED protocol is implemented)."""
-        pass
+        """Set all 24 LED ring LEDs to the same color via CRT+SETLB command.
+
+        Protocol (captured via strace of libtransport.so):
+          CRT + SETLB + [R, G, B] * 24
+        Each LED gets an individual RGB triplet; we repeat the same color 24 times.
+        """
+        r = max(0, min(255, r))
+        g = max(0, min(255, g))
+        b = max(0, min(255, b))
+        rgb_data = bytes([r, g, b]) * _LED_COUNT
+        try:
+            self._raw_write(_build_cmd(_CMD_SETLB + rgb_data))
+        except OSError as e:
+            logger.warning("Failed to set LED color: %s", e)
+
+    def reset_led_color(self) -> None:
+        """Reset LED ring to firmware default via CRT+DELED command."""
+        try:
+            self._raw_write(_build_cmd(_CMD_DELED))
+        except OSError as e:
+            logger.warning("Failed to reset LED color: %s", e)
 
     def set_led_brightness(self, level: int) -> None:
         """Set LED ring brightness via CRT+LBLIG command."""
@@ -264,6 +307,7 @@ class StreamDockDevice:
         """Send CRT+CONNECT heartbeat to prevent firmware idle timeout.
 
         The firmware reverts to demo mode without periodic CONNECT commands.
+        Triggers USB reconnection on write failure.
         """
         if self._hidraw_fd is None:
             return False
@@ -274,6 +318,7 @@ class StreamDockDevice:
             return True
         except OSError as e:
             logger.warning("Heartbeat write failed: %s", e)
+            self._trigger_reconnect()
             return False
 
     def set_key_callback(self, callback: KeyCallback) -> None:
@@ -317,10 +362,104 @@ class StreamDockDevice:
             except OSError as e:
                 if not self._reader_stop.is_set():
                     logger.warning("hidraw read error: %s", e)
+                    self._trigger_reconnect()
                 break
             except Exception:
                 if not self._reader_stop.is_set():
                     logger.exception("Error in hidraw reader")
+
+    def _trigger_reconnect(self) -> None:
+        """Initiate USB reconnection in a background thread.
+
+        Only one reconnect attempt runs at a time (guarded by _reconnecting event).
+        """
+        if self._reconnecting.is_set():
+            return  # Already reconnecting
+        self._reconnecting.set()
+        threading.Thread(
+            target=self._reconnect_loop,
+            daemon=True,
+            name="usb-reconnect",
+        ).start()
+
+    def _reconnect_loop(self) -> None:
+        """Attempt to reconnect to the device after USB disconnect."""
+        try:
+            logger.info("USB reconnect: starting (max %d attempts)", self._MAX_RECONNECT_ATTEMPTS)
+            self._connected = False
+
+            # Close the stale fd
+            self._cleanup_fd()
+
+            for attempt in range(1, self._MAX_RECONNECT_ATTEMPTS + 1):
+                if self._reader_stop.is_set():
+                    logger.info("USB reconnect: aborted (shutdown requested)")
+                    return
+
+                logger.info("USB reconnect: attempt %d/%d (waiting %.0fs)",
+                            attempt, self._MAX_RECONNECT_ATTEMPTS,
+                            self._RECONNECT_DELAY_SECONDS)
+                time.sleep(self._RECONNECT_DELAY_SECONDS)
+
+                # Try to find and open the device
+                path = _find_hidraw(self._vid, self._pid)
+                if not path:
+                    logger.info("USB reconnect: device not found yet")
+                    continue
+
+                try:
+                    fd = os.open(path, os.O_RDWR)
+                except OSError as e:
+                    logger.info("USB reconnect: failed to open %s: %s", path, e)
+                    continue
+
+                # Device found and opened — reinitialize
+                self._hidraw_fd = fd
+                self._hidraw_path = path
+                logger.info("USB reconnect: opened %s (fd=%d)", path, fd)
+
+                try:
+                    # Re-run init sequence: wake → brightness → heartbeat
+                    # Write directly to fd (bypass _raw_write which checks _reconnecting)
+                    # Apply same gamma curve as set_brightness()
+                    gamma_brightness = round(pow(self._brightness / 100, 0.75) * 100)
+                    with self._write_lock:
+                        os.write(fd, _WAKE_PACKET)
+                        os.write(fd, _build_cmd(bytes([
+                            0x4C, 0x49, 0x47, 0x00, 0x00, gamma_brightness,
+                        ])))
+                        os.write(fd, _HEARTBEAT_PACKET)
+
+                    # Clear reconnecting flag BEFORE re-sending image
+                    # (set_screen_image uses _raw_write which checks the flag)
+                    self._reconnecting.clear()
+                    self._connected = True
+
+                    # Re-send cached screen image
+                    if self._screen_jpeg:
+                        self.set_screen_image(self._screen_jpeg)
+                        logger.info("USB reconnect: screen image restored")
+
+                    # Restart the reader thread
+                    self._reader_stop.clear()
+                    self._reader_thread = threading.Thread(
+                        target=self._reader_loop,
+                        daemon=True,
+                        name="hidraw-reader",
+                    )
+                    self._reader_thread.start()
+
+                    logger.info("USB reconnect: successful on attempt %d", attempt)
+                    return
+                except OSError as e:
+                    logger.warning("USB reconnect: init failed on %s: %s", path, e)
+                    self._cleanup_fd()
+                    continue
+
+            logger.error("USB reconnect: all %d attempts failed — device offline",
+                         self._MAX_RECONNECT_ATTEMPTS)
+        finally:
+            self._reconnecting.clear()
 
 
 class StubDevice:
@@ -357,6 +496,9 @@ class StubDevice:
 
     def set_led_brightness(self, level: int) -> None:
         logger.debug("Stub: LED brightness set to %d", level)
+
+    def reset_led_color(self) -> None:
+        logger.debug("Stub: LED color reset (no-op)")
 
     def set_key_callback(self, callback: KeyCallback) -> None:
         self._key_callback = callback

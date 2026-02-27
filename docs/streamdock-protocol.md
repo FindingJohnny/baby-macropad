@@ -163,11 +163,38 @@ CRT + [0x4C, 0x42, 0x4C, 0x49, 0x47, 0x00, 0x00, level]
 
 Level 0 turns off the LED ring entirely.
 
-### LED Color
+### SETLB (LED Ring Color)
 
-**Not yet reverse-engineered.** The `set_led_color()` method is currently a
-no-op. The C library likely has a separate command for this. Future work:
-strace the SDK's `set_key_light_color()` method.
+Sets the color of the 24 RGB LEDs around the dial. Each LED gets an individual
+R, G, B triplet, allowing per-LED color control. To set all LEDs to the same
+color, repeat the same triplet 24 times.
+
+```
+CRT + [0x53, 0x45, 0x54, 0x4C, 0x42, R0, G0, B0, R1, G1, B1, ..., R23, G23, B23]
+       S     E     T     L     B     ---  LED 0 ---  --- LED 1 --- ... --- LED 23 ---
+```
+
+- Each R, G, B value is 0-255.
+- Total RGB data: 24 LEDs x 3 bytes = 72 bytes after the SETLB command.
+- The entire payload (CRT prefix + SETLB + 72 bytes RGB) is zero-padded to 1024
+  bytes, plus the 0x00 report ID prefix = 1025 bytes total.
+
+**Reverse-engineered** via `strace` of `libtransport.so`'s
+`transport_set_led_color(handle, count=24, r, g, b)`. The C library repeats the
+same (R, G, B) triplet `count` times. Per-LED addressing could be achieved by
+constructing the packet manually with different triplets per LED.
+
+### DELED (LED Ring Reset)
+
+Resets the LED ring to its default state (firmware-controlled rainbow animation
+or off, depending on firmware version).
+
+```
+CRT + [0x44, 0x45, 0x4C, 0x45, 0x44]
+       D     E     L     E     D
+```
+
+Reverse-engineered via `strace` of `transport_reset_led_color()`.
 
 ## Button Events (Reading)
 

@@ -86,12 +86,57 @@ class DashboardConfig(BaseModel):
     show_clock: bool = True
 
 
+class NoteCategoryConfig(BaseModel):
+    label: str
+    content: str = ""
+    icon: str = ""
+
+
+class BrightnessScheduleConfig(BaseModel):
+    enabled: bool = False
+    day_brightness: int = Field(default=80, ge=0, le=100)
+    night_brightness: int = Field(default=20, ge=0, le=100)
+    night_start: str = "20:00"
+    night_end: str = "06:00"
+
+
+class DisplayConfig(BaseModel):
+    auto_sleep_minutes: int = Field(default=10, ge=0, le=60)
+    off_during_sleep: bool = True
+    brightness_schedule: BrightnessScheduleConfig = Field(
+        default_factory=BrightnessScheduleConfig
+    )
+
+
+class QuietHoursConfig(BaseModel):
+    enabled: bool = False
+    start: str = "21:00"
+    end: str = "06:00"
+
+
+class AnimationsConfig(BaseModel):
+    enabled: bool = True
+    quiet_hours: QuietHoursConfig = Field(default_factory=QuietHoursConfig)
+
+
+class SettingsMenuConfig(BaseModel):
+    timer_duration_seconds: int = Field(default=7, ge=0, le=30)
+    skip_breast_detail: bool = False
+    celebration_style: str = "color_fill"
+    lock_enabled: bool = False
+    lock_pin: str = ""
+
+
 class MacropadConfig(BaseModel):
     device: DeviceConfig = Field(default_factory=DeviceConfig)
+    display: DisplayConfig = Field(default_factory=DisplayConfig)
+    animations: AnimationsConfig = Field(default_factory=AnimationsConfig)
+    settings_menu: SettingsMenuConfig = Field(default_factory=SettingsMenuConfig)
     baby_basics: BabyBasicsConfig
     home_assistant: HomeAssistantConfig = Field(default_factory=HomeAssistantConfig)
     buttons: dict[int, ButtonConfig] = Field(default_factory=dict)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
+    notes_categories: list[NoteCategoryConfig] = Field(default_factory=list)
 
     @field_validator("buttons", mode="before")
     @classmethod

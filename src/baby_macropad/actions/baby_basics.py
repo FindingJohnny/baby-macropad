@@ -62,12 +62,15 @@ class BabyBasicsClient:
         if resp.status_code >= 400:
             try:
                 body = resp.json()
-                error = body.get("error", {})
-                raise BabyBasicsAPIError(
-                    status_code=resp.status_code,
-                    message=error.get("message", resp.text),
-                    details=error.get("details", []),
-                )
+                if isinstance(body, dict):
+                    error = body.get("error", {})
+                    if isinstance(error, dict):
+                        raise BabyBasicsAPIError(
+                            status_code=resp.status_code,
+                            message=error.get("message", resp.text),
+                            details=error.get("details", []),
+                        )
+                raise BabyBasicsAPIError(resp.status_code, str(body))
             except (ValueError, KeyError):
                 raise BabyBasicsAPIError(resp.status_code, resp.text)
         if resp.status_code == 204:
@@ -93,10 +96,10 @@ class BabyBasicsClient:
         return self._handle_response(resp)
 
     def end_sleep(self, sleep_id: str) -> dict[str, Any]:
-        """PATCH /children/:childId/sleeps/:id"""
+        """PUT /children/:childId/sleeps/:id"""
         logger.info("Ending sleep: %s", sleep_id)
         end_time = datetime.now(timezone.utc).isoformat()
-        resp = self._client.patch(f"/sleeps/{sleep_id}", json={"end_time": end_time})
+        resp = self._client.put(f"/sleeps/{sleep_id}", json={"end_time": end_time})
         return self._handle_response(resp)
 
     def toggle_sleep(self, dashboard: DashboardData | None = None) -> dict[str, Any]:

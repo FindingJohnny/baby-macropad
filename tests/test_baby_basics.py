@@ -61,7 +61,7 @@ def test_start_sleep(client: BabyBasicsClient):
 
 @respx.mock
 def test_end_sleep(client: BabyBasicsClient):
-    respx.patch(f"{BASE}/sleeps/s1").mock(
+    respx.put(f"{BASE}/sleeps/s1").mock(
         return_value=Response(200, json={"sleep": {"id": "s1", "end_time": "2026-01-01T02:00:00Z"}})
     )
     result = client.end_sleep("s1")
@@ -79,7 +79,7 @@ def test_toggle_sleep_starts_when_none_active(client: BabyBasicsClient):
 
 @respx.mock
 def test_toggle_sleep_ends_when_active(client: BabyBasicsClient):
-    respx.patch(f"{BASE}/sleeps/active-s1").mock(
+    respx.put(f"{BASE}/sleeps/active-s1").mock(
         return_value=Response(200, json={"sleep": {"id": "active-s1", "end_time": "2026-01-01T03:00:00Z"}})
     )
     dashboard = DashboardData(active_sleep={"id": "active-s1", "start_time": "2026-01-01T01:00:00Z"})

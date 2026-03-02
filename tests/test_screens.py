@@ -223,10 +223,10 @@ class TestSettingsScreen:
     def test_auto_generates_from_model(self):
         settings = SettingsModel()
         screen = build_settings_screen(settings)
-        # Should have cards for non-hidden fields + BACK
+        # Should have cards for non-hidden fields + BACK + title
         # Non-hidden fields: timer_duration_seconds, skip_breast_detail,
-        # celebration_style, brightness = 4 fields + 1 BACK = 5 cells
-        assert len(screen.cells) == 5
+        # celebration_style, brightness = 4 fields + 1 BACK + 1 title = 6 cells
+        assert len(screen.cells) == 6
 
     def test_back_at_key_1(self):
         settings = SettingsModel()

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from ..framework.primitives import BACK_BUTTON_BG, SECONDARY_TEXT, SCREEN_W, VIS_COL_W, VIS_COL_X, VIS_ROW_H, VIS_ROW_Y, darken
+from ..framework.primitives import BACK_BUTTON_BG, SECONDARY_TEXT, darken
 from ..framework.screen import CellDef, ScreenDef
-from ..framework.widgets import Card, Text
-from ..framework.text_engine import get_font
+from ..framework.widgets import Card, Text, TwoLineText
 
 
 def build_detail_screen(
@@ -13,20 +12,25 @@ def build_detail_screen(
     options: list[dict],
     timer_seconds: int,
     category_color: tuple[int, int, int],
+    hint: str = "Log In",
+    subtitle: str | None = None,
 ) -> ScreenDef:
     """Build a parameter selection screen.
 
     Layout:
-      Top row (keys 11-14): option cards (selected=filled, unselected=outlined)
-      Key 10 (col 4, row 1): timer countdown card
+      Top row: option cards centered (e.g. 3 options → keys 12,13,14)
+      Key 8 (col 2, row 1): "Log In" label on top + BIG countdown number below
+      Key 7 (col 1, row 1): title card (optionally with subtitle)
       Key 1 (col 0, row 2): BACK card
-    pre_render draws the title centered across cols 1-3 in the middle row.
+    All text rendered via cell widgets — no pre_render text.
     """
     cells: dict[int, CellDef] = {}
 
-    # Option cards in top row (keys 11-14)
-    for opt in options:
-        key_num = opt.get("key_num", 11)
+    # Option cards — centered in top row (keys 11-15)
+    n = len(options)
+    start_key = 11 + (5 - n) // 2  # center: 1→13, 2→12, 3→12, 4→11, 5→11
+    for i, opt in enumerate(options):
+        key_num = opt.get("key_num", start_key + i)
         selected = opt.get("selected", False)
         label = opt.get("label", "?")
 
@@ -45,18 +49,46 @@ def build_detail_screen(
         cells[key_num] = CellDef(
             widget=widget,
             key_num=key_num,
-            on_press=f"select_option:{key_num - 11}",
+            on_press=f"select_option:{i}",
         )
 
-    # Timer card — key 10 (col 4, row 1)
-    timer_text = f"{timer_seconds}s"
-    cells[10] = CellDef(
+    # Countdown card — key 8 (col 2, row 1) — label on top, BIG number below
+    cells[8] = CellDef(
         widget=Card(
-            fill=darken(category_color, 0.30),
-            child=Text(text=timer_text, color=category_color, font_sizes=(14, 12, 10)),
+            fill=darken(category_color, 0.15),
+            child=TwoLineText(
+                line1=hint,
+                line2=str(timer_seconds),
+                color1=SECONDARY_TEXT,
+                color2=category_color,
+                font_sizes1=(10, 9),
+                font_sizes2=(24, 20, 16),
+                gap=6,
+            ),
         ),
-        key_num=10,
+        key_num=8,
     )
+
+    # Title card — key 7 (col 1, row 1) — optionally with subtitle
+    if subtitle:
+        title_widget = Card(
+            fill=darken(category_color, 0.08),
+            child=TwoLineText(
+                line1=title,
+                line2=subtitle,
+                color1=(255, 255, 255),
+                color2=SECONDARY_TEXT,
+                font_sizes1=(14, 12, 10),
+                font_sizes2=(10, 9),
+                gap=4,
+            ),
+        )
+    else:
+        title_widget = Card(
+            fill=darken(category_color, 0.08),
+            child=Text(text=title, color=(255, 255, 255), font_sizes=(14, 12, 10)),
+        )
+    cells[7] = CellDef(widget=title_widget, key_num=7)
 
     # BACK button — key 1 (col 0, row 2)
     cells[1] = CellDef(
@@ -68,21 +100,4 @@ def build_detail_screen(
         on_press="back",
     )
 
-    # Title + instruction rendered via pre_render (spans cols 1-3, centered in middle row)
-    def _draw_title(img, draw):
-        title_font = get_font(16, bold=True)
-        tb = draw.textbbox((0, 0), title, font=title_font)
-        tw = tb[2] - tb[0]
-        th = tb[3] - tb[1]
-        center_x = (VIS_COL_X[1] + VIS_COL_X[3] + VIS_COL_W[3]) // 2
-        ty = VIS_ROW_Y[1] + (VIS_ROW_H[1] - th) // 2 - 8
-        draw.text((center_x - tw // 2, ty), title, fill=(255, 255, 255), font=title_font)
-
-        # Instruction hint below title
-        hint_font = get_font(10, bold=True)
-        hint = "tap option or wait"
-        hb = draw.textbbox((0, 0), hint, font=hint_font)
-        hw = hb[2] - hb[0]
-        draw.text((center_x - hw // 2, ty + th + 4), hint, fill=SECONDARY_TEXT, font=hint_font)
-
-    return ScreenDef(name="detail", cells=cells, pre_render=_draw_title)
+    return ScreenDef(name="detail", cells=cells)

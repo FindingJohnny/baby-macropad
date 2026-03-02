@@ -71,6 +71,7 @@ ICON_ASSETS: dict[str, str | tuple[str, str]] = {
     "pill": "pill",
     "thermometer": "thermometer",
     "star": "star",
+    "sunrise": "sunrise",
 }
 
 # Labels shown below the icon
@@ -92,6 +93,7 @@ ICON_LABELS = {
     "pill": "MEDS",
     "thermometer": "TEMP",
     "star": "MILSTN",
+    "sunrise": "WAKE UP",
 }
 
 
@@ -113,12 +115,13 @@ def darken(color: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
 def key_to_grid(key_num: int) -> tuple[int, int] | None:
     """Key number (1-15) to grid (col, row).
 
-    M18 physical-to-key mapping (verified by testing):
+    Logical key mapping (after _remap_key in main.py):
       Top row:    KEY_11  KEY_12  KEY_13  KEY_14  KEY_15
       Middle row: KEY_6   KEY_7   KEY_8   KEY_9   KEY_10
       Bottom row: KEY_1   KEY_2   KEY_3   KEY_4   KEY_5
 
-    Top and bottom rows are swapped vs naive numbering.
+    NOTE: Hardware physically sends 1-5 for top and 11-15 for bottom.
+    The remap in main._remap_key() swaps them so this mapping is correct.
     """
     if key_num < 1 or key_num > 15:
         return None

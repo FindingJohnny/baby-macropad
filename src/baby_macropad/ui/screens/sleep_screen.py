@@ -91,7 +91,7 @@ def build_sleep_screen(
     cells[13] = CellDef(
         widget=Card(
             fill=(38, 38, 40),
-            child=Text(text="WAKE UP", color=_DIM_SECONDARY, font_sizes=(11, 10, 8)),
+            child=Text(text="WAKE UP", color=_DIM_SECONDARY, font_sizes=(10, 9, 8)),
         ),
         key_num=13,
         on_press="wake_up",

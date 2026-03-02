@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from ...settings import SettingsModel
-from ..framework.primitives import BACK_BUTTON_BG, ICON_COLORS, SCREEN_W, SECONDARY_TEXT, VIS_ROW_H, VIS_ROW_Y, darken
+from ..framework.primitives import BACK_BUTTON_BG, ICON_COLORS, SECONDARY_TEXT, darken
 from ..framework.screen import CellDef, ScreenDef
 from ..framework.widgets import Card, Text, TwoLineText
-from ..framework.text_engine import get_font
 
 _SETTINGS_COLOR = ICON_COLORS.get("settings", (200, 200, 200))
 
@@ -72,15 +71,14 @@ def build_settings_screen(settings: SettingsModel) -> ScreenDef:
             on_press=f"cycle:{field_name}",
         )
 
-    # Title via pre_render — centered in middle row
-    def _draw_title(img, draw):
-        title_font = get_font(14, bold=True)
-        title = "SETTINGS"
-        tb = draw.textbbox((0, 0), title, font=title_font)
-        tw = tb[2] - tb[0]
-        tx = (SCREEN_W - tw) // 2
-        ty = VIS_ROW_Y[1] + (VIS_ROW_H[1] - (tb[3] - tb[1])) // 2
-        draw.text((tx, ty), title, fill=_SETTINGS_COLOR, font=title_font)
+    # Title in cell at key 8 (col 2, row 1) — only if not used by a setting card
+    if 8 not in cells:
+        cells[8] = CellDef(
+            widget=Text(
+                text="SETTINGS", color=_SETTINGS_COLOR, font_sizes=(14, 12, 10)
+            ),
+            key_num=8,
+        )
 
     # BACK button at key 1
     cells[1] = CellDef(
@@ -92,4 +90,4 @@ def build_settings_screen(settings: SettingsModel) -> ScreenDef:
         on_press="back",
     )
 
-    return ScreenDef(name="settings", cells=cells, pre_render=_draw_title)
+    return ScreenDef(name="settings", cells=cells)

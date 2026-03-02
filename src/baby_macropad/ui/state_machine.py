@@ -93,6 +93,12 @@ class StateMachine:
                 # Refresh countdown display
                 return TickAction(action="refresh", mode="detail")
 
+            # Wake confirmation: auto-confirm on timer expiry
+            if s.mode == "wake_confirm":
+                if s.wake_confirm_expires > 0 and now >= s.wake_confirm_expires:
+                    return TickAction(action="wake_confirm_expired", mode="wake_confirm")
+                return TickAction(action="refresh", mode="wake_confirm")
+
             # Sleep mode: refresh elapsed timer
             if s.mode == "sleep_mode":
                 return TickAction(action="refresh", mode="sleep_mode")
@@ -130,13 +136,17 @@ class StateMachine:
                 column, expires, resource_id, resource_type,
             )
 
+    def enter_wake_confirm(self, expires: float, from_sleep: bool = False) -> None:
+        with self._lock:
+            self._state.enter_wake_confirm(expires, from_sleep)
+
     def enter_sleep_mode(self, sleep_id: str, start_time: str) -> None:
         with self._lock:
             self._state.enter_sleep_mode(sleep_id, start_time)
 
-    def exit_sleep_mode(self) -> None:
+    def exit_sleep_mode(self, ended_id: str | None = None) -> None:
         with self._lock:
-            self._state.exit_sleep_mode()
+            self._state.exit_sleep_mode(ended_id=ended_id)
 
     def return_home(self) -> None:
         with self._lock:

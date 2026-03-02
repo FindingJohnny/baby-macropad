@@ -64,33 +64,36 @@ class Text:
 
 @dataclass
 class TwoLineText:
-    """Title + subtitle stacked vertically, centered as a group."""
+    """Title + subtitle stacked vertically, centered as a group.
+
+    Each line auto-sizes: tries each font size largest to smallest,
+    truncates with ellipsis if the smallest still doesn't fit.
+    """
 
     line1: str
     line2: str
     color1: tuple[int, int, int] = (142, 142, 147)
     color2: tuple[int, int, int] = (200, 200, 200)
-    font_size1: int = 9
-    font_size2: int = 14
+    font_sizes1: tuple[int, ...] = (9, 8)
+    font_sizes2: tuple[int, ...] = (14, 12, 10)
+    gap: int = 3
 
     def render(self, img: Image.Image, draw: ImageDraw.ImageDraw, rect: Rect) -> None:
-        font1 = get_font(self.font_size1, bold=True)
-        font2 = get_font(self.font_size2, bold=True)
-        tb1 = draw.textbbox((0, 0), self.line1, font=font1)
-        tb2 = draw.textbbox((0, 0), self.line2, font=font2)
-        h1 = tb1[3] - tb1[1]
-        h2 = tb2[3] - tb2[1]
-        gap = 3
+        max_w = rect.w - 4  # small inner margin
+        max_h = rect.h // 2
+
+        font1, text1, w1, h1 = fit_text(draw, self.line1, max_w, max_h, self.font_sizes1)
+        font2, text2, w2, h2 = fit_text(draw, self.line2, max_w, max_h, self.font_sizes2)
+
+        gap = self.gap
         total_h = h1 + gap + h2
         by = rect.y + (rect.h - total_h) // 2
 
-        w1 = tb1[2] - tb1[0]
         draw.text(
-            (rect.x + (rect.w - w1) // 2, by), self.line1, fill=self.color1, font=font1
+            (rect.x + (rect.w - w1) // 2, by), text1, fill=self.color1, font=font1
         )
-        w2 = tb2[2] - tb2[0]
         draw.text(
-            (rect.x + (rect.w - w2) // 2, by + h1 + gap), self.line2, fill=self.color2, font=font2
+            (rect.x + (rect.w - w2) // 2, by + h1 + gap), text2, fill=self.color2, font=font2
         )
 
 
@@ -171,12 +174,14 @@ class IconLabel:
         # Draw label below icon
         from .primitives import ICON_LABELS
 
-        display_label = ICON_LABELS.get(self.icon_name, self.label[:6].upper())
-        bbox = draw.textbbox((0, 0), display_label, font=label_font)
-        lw = bbox[2] - bbox[0]
+        display_label = ICON_LABELS.get(self.icon_name, self.label.upper())
+        max_label_w = rect.w - 4
+        label_font_used, display_label, lw, lh = fit_text(
+            draw, display_label, max_label_w, label_height, (11, 10, 9)
+        )
         lx = rect.x + (rect.w - lw) // 2
         ly = rect.y + top_offset + self.icon_size + icon_label_gap
-        draw.text((lx, ly), display_label, fill=self.color, font=label_font)
+        draw.text((lx, ly), display_label, fill=self.color, font=label_font_used)
 
         # Draw badge if present
         if self.badge:

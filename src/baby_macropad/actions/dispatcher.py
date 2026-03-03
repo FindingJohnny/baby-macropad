@@ -314,7 +314,8 @@ class ActionDispatcher:
             side = dashboard.suggested_side
             return f"Next: {side[0].upper()}" if side else f"{counts.get('feedings', 0)} feeds"
         elif category == "diaper":
-            return f"{counts.get('diapers', 0)} diapers"
+            total = counts.get("diapers_pee", 0) + counts.get("diapers_poop", 0)
+            return f"{total} diapers"
         elif category == "pump":
             return "Pumped"
         return ""

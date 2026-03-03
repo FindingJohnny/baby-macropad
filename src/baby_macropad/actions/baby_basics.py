@@ -138,7 +138,7 @@ class BabyBasicsClient:
             last_diaper=dashboard.get("last_diaper"),
             last_sleep=dashboard.get("last_sleep"),
             suggested_side=dashboard.get("suggested_side"),
-            today_counts=dashboard.get("today_counts", {}),
+            today_counts=dashboard.get("today", dashboard.get("today_counts", {})),
             raw=dashboard,
         )
 

@@ -410,7 +410,7 @@ def test_optimistic_update_after_feeding(controller: MacropadController):
 def test_optimistic_update_after_diaper(controller: MacropadController):
     """After logging a diaper, count increments."""
     dashboard = DashboardData(
-        today_counts={"feedings": 2, "diapers": 4},
+        today_counts={"feedings": 2, "diapers_pee": 3, "diapers_poop": 1},
     )
     controller._sm.set_dashboard(dashboard, True, 0)
     respx.post(f"{BASE}/diapers").mock(
@@ -424,4 +424,4 @@ def test_optimistic_update_after_diaper(controller: MacropadController):
         {"type": "pee"},
         "Pee", "diaper_pee", (204, 170, 68), "diaper", 1, "diapers",
     )
-    assert dashboard.today_counts["diapers"] == 5
+    assert dashboard.today_counts["diapers_pee"] == 4

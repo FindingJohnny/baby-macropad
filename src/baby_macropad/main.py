@@ -16,27 +16,30 @@ import signal
 import sys
 import threading
 import time
-from datetime import datetime, time as dt_time, timezone
+from datetime import datetime, timezone
+from datetime import time as dt_time
 from typing import Any
+
+import httpx
 
 from baby_macropad.actions.baby_basics import BabyBasicsAPIError, BabyBasicsClient, DashboardData
 from baby_macropad.config import MacropadConfig, load_config
 from baby_macropad.device import StreamDockDevice, StubDevice
 from baby_macropad.offline.queue import OfflineQueue
 from baby_macropad.offline.sync import SyncWorker
+from baby_macropad.settings import SettingsModel
 from baby_macropad.state import DisplayState
 from baby_macropad.ui.framework.screen import ScreenRenderer
 from baby_macropad.ui.key_router import KeyRouter
 from baby_macropad.ui.led import LedController
-from baby_macropad.ui.state_machine import StateMachine
-from baby_macropad.ui.screens.home import build_home_grid
-from baby_macropad.ui.screens.detail import build_detail_screen
 from baby_macropad.ui.screens.confirmation import build_confirmation_screen
+from baby_macropad.ui.screens.dashboard_screen import build_dashboard_screen
+from baby_macropad.ui.screens.detail import build_detail_screen
+from baby_macropad.ui.screens.home import build_home_grid
 from baby_macropad.ui.screens.selection import build_selection_screen
 from baby_macropad.ui.screens.settings_screen import build_settings_screen
 from baby_macropad.ui.screens.sleep_screen import build_sleep_screen
-from baby_macropad.ui.screens.dashboard_screen import build_dashboard_screen
-from baby_macropad.settings import SettingsModel
+from baby_macropad.ui.state_machine import StateMachine
 
 logger = logging.getLogger(__name__)
 
@@ -379,10 +382,10 @@ class MacropadController:
         if not button:
             return
         if button.action == "macropad.settings":
-            self._sm.state.mode = "settings"
+            self._sm.enter_settings()
             self.refresh_display()
         elif button.action == "baby_basics.notes_submenu":
-            self._sm.state.mode = "notes_submenu"
+            self._sm.enter_notes_submenu()
             self.refresh_display()
         elif button.action == "baby_basics.toggle_sleep":
             self._handle_sleep_toggle()
@@ -428,7 +431,7 @@ class MacropadController:
         if key == 1:
             # BACK → return to where we came from
             if self._sm.state.wake_confirm_from_sleep:
-                self._sm.state.mode = "sleep_mode"
+                self._sm.resume_sleep_mode()
                 self._device.set_brightness(10)
             else:
                 self._sm.return_home()
@@ -472,9 +475,11 @@ class MacropadController:
             if i < len(setting_keys) and key == setting_keys[i]:
                 self._settings.cycle_field(field_name)
                 # Sync timer_seconds and other settings to state
-                self._sm.state.timer_seconds = self._settings.timer_duration_seconds
-                self._sm.state.celebration_style = self._settings.celebration_style
-                self._sm.state.skip_breast_detail = self._settings.skip_breast_detail
+                self._sm.sync_settings(
+                    self._settings.timer_duration_seconds,
+                    self._settings.celebration_style,
+                    self._settings.skip_breast_detail,
+                )
                 # Apply brightness immediately if that's what changed
                 self._device.set_brightness(self._settings.brightness)
                 self.refresh_display()
@@ -544,7 +549,9 @@ class MacropadController:
                     resource_id = result.get("id")
             context_line = self._build_context_line(category)
             self._led.flash_category(category)
-        except (BabyBasicsAPIError, ConnectionError, Exception) as e:
+        except (
+            BabyBasicsAPIError, ConnectionError, httpx.TimeoutException, httpx.ConnectError
+        ) as e:
             logger.warning("Action failed, queueing offline: %s", e)
             self.queue.enqueue(api_action, params)
             context_line = "Queued"
@@ -600,9 +607,9 @@ class MacropadController:
             if sleep_id:
                 # Store sleep state for wake confirmation flow
                 if not self._sm.state.sleep_active:
-                    self._sm.state.sleep_active = True
-                    self._sm.state.sleep_id = sleep_id
-                    self._sm.state.sleep_start_time = dashboard.active_sleep.get("start_time")
+                    self._sm.sync_sleep_active(
+                        True, sleep_id, dashboard.active_sleep.get("start_time")
+                    )
                 self._enter_wake_confirm()
             return
         try:
@@ -610,7 +617,9 @@ class MacropadController:
             data = result.get("sleep", result)
             self._sm.enter_sleep_mode(data.get("id", ""), data.get("start_time", datetime.now(timezone.utc).isoformat()))
             self._led.flash_sleep_start()
-        except (BabyBasicsAPIError, ConnectionError, Exception) as e:
+        except (
+            BabyBasicsAPIError, ConnectionError, httpx.TimeoutException, httpx.ConnectError
+        ) as e:
             logger.warning("Failed to start sleep: %s", e)
             self.queue.enqueue("baby_basics.toggle_sleep", {})
             self._sm.enter_sleep_mode("pending", datetime.now(timezone.utc).isoformat())
@@ -636,7 +645,9 @@ class MacropadController:
             self._led.flash_wake()
             self._sm.enter_confirmation("baby_basics.end_sleep", "Awake!", duration_str,
                                         "sunrise", (255, 220, 150), 2, time.monotonic() + CONFIRMATION_DURATION, None, "sleeps")
-        except (BabyBasicsAPIError, ConnectionError, Exception) as e:
+        except (
+            BabyBasicsAPIError, ConnectionError, httpx.TimeoutException, httpx.ConnectError
+        ) as e:
             logger.warning("Failed to end sleep: %s", e)
             self._sm.exit_sleep_mode()
             self._sm.return_home()
@@ -667,7 +678,9 @@ class MacropadController:
         try:
             self._delete_resource(rtype, rid)
             self._led.flash_undo()
-        except Exception as e:
+        except (
+            BabyBasicsAPIError, ConnectionError, httpx.TimeoutException, httpx.ConnectError
+        ) as e:
             logger.warning("Undo failed, queueing: %s", e)
             self.queue.enqueue(f"baby_basics.delete_{rtype}", {"resource_id": rid})
             self._led.flash_queued()
@@ -710,7 +723,7 @@ class MacropadController:
                     self._sm.set_sleep_from_dashboard(sleep_id, dashboard.active_sleep.get("start_time"))
             # Clear ended_sleep_id once dashboard confirms it's gone
             if not dashboard.active_sleep and self._sm.state.ended_sleep_id:
-                self._sm.state.ended_sleep_id = None
+                self._sm.clear_ended_sleep()
         except Exception:
             self._sm.set_connected(False)
 

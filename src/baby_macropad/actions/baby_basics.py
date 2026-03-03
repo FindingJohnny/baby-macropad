@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -71,8 +70,8 @@ class BabyBasicsClient:
                             details=error.get("details", []),
                         )
                 raise BabyBasicsAPIError(resp.status_code, str(body))
-            except (ValueError, KeyError):
-                raise BabyBasicsAPIError(resp.status_code, resp.text)
+            except ValueError as exc:
+                raise BabyBasicsAPIError(resp.status_code, resp.text) from exc
         if resp.status_code == 204:
             return {}
         return resp.json()
@@ -143,5 +142,5 @@ class BabyBasicsClient:
         try:
             self.get_dashboard()
             return True
-        except Exception:
+        except (httpx.HTTPError, BabyBasicsAPIError):
             return False

@@ -208,3 +208,33 @@ class StateMachine:
                 a for a in self._state.recent_actions
                 if a.get("resource_id") != resource_id
             ]
+
+    def enter_settings(self) -> None:
+        with self._lock:
+            self._state.mode = "settings"
+
+    def enter_notes_submenu(self) -> None:
+        with self._lock:
+            self._state.mode = "notes_submenu"
+
+    def resume_sleep_mode(self) -> None:
+        with self._lock:
+            self._state.mode = "sleep_mode"
+
+    def sync_settings(
+        self, timer_seconds: int, celebration_style: str, skip_breast_detail: bool
+    ) -> None:
+        with self._lock:
+            self._state.timer_seconds = timer_seconds
+            self._state.celebration_style = celebration_style
+            self._state.skip_breast_detail = skip_breast_detail
+
+    def sync_sleep_active(self, sleep_active: bool, sleep_id: str, start_time: str | None) -> None:
+        with self._lock:
+            self._state.sleep_active = sleep_active
+            self._state.sleep_id = sleep_id
+            self._state.sleep_start_time = start_time
+
+    def clear_ended_sleep(self) -> None:
+        with self._lock:
+            self._state.ended_sleep_id = None

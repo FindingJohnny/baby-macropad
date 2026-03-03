@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "baby-macropad"
-version = "0.1.0"
+version = "0.3.0"
 description = "Stream Dock M18 macropad controller for Baby Basics baby tracking"
 readme = "README.md"
 license = "MIT"

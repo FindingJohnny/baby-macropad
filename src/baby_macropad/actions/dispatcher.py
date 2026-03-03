@@ -246,64 +246,18 @@ class ActionDispatcher:
     def _build_celebration_frames(
         self, category_color: tuple[int, int, int], style: str,
     ) -> list[bytes]:
-        """Pre-render celebration frames as JPEG bytes.
+        """Pre-render celebration frames as JPEG bytes using PIL graphics.
 
-        - flash: 1 frame — full screen category color + checkmark
-        - pulse: 2 frames — full color, then top row only
-        - ripple: 3 frames — center col, center+adjacent, all cols (top row)
+        Draws directly on the 480x272 canvas — bezels naturally window each
+        cell's portion of the image, creating organic visual effects.
+
+        - flash: 1 frame — radial glow from center + checkmark
+        - starburst: 2 frames — radiating lines from center, then full glow
+        - sparkle: 2 frames — scattered bright circles, alternating positions
+        - spotlight: 2 frames — tight center glow, then expanded
         """
-        from baby_macropad.ui.framework.screen import CellDef, ScreenDef
-        from baby_macropad.ui.framework.widgets import Card, Icon, Spacer
-
-        def _color_cells(keys: set[int]) -> dict[int, CellDef]:
-            cells: dict[int, CellDef] = {}
-            for key in keys:
-                cells[key] = CellDef(
-                    widget=Card(fill=category_color, child=Spacer()),
-                    key_num=key,
-                )
-            return cells
-
-        top_row = {11, 12, 13, 14, 15}
-        all_keys = set(range(1, 16))
-
-        if style == "flash":
-            cells = _color_cells(all_keys)
-            cells[8] = CellDef(
-                widget=Card(
-                    fill=category_color,
-                    child=Icon(asset_name="check", color=(255, 255, 255), size=36),
-                ),
-                key_num=8,
-            )
-            return [self._renderer.render(ScreenDef(name="celebration", cells=cells))]
-
-        elif style == "pulse":
-            cells1 = _color_cells(all_keys)
-            cells1[8] = CellDef(
-                widget=Card(
-                    fill=category_color,
-                    child=Icon(asset_name="check", color=(255, 255, 255), size=36),
-                ),
-                key_num=8,
-            )
-            cells2 = _color_cells(top_row)
-            return [
-                self._renderer.render(ScreenDef(name="celebration", cells=cells1)),
-                self._renderer.render(ScreenDef(name="celebration", cells=cells2)),
-            ]
-
-        elif style == "ripple":
-            cells1 = _color_cells({13})
-            cells2 = _color_cells({12, 13, 14})
-            cells3 = _color_cells(top_row)
-            return [
-                self._renderer.render(ScreenDef(name="celebration", cells=cells1)),
-                self._renderer.render(ScreenDef(name="celebration", cells=cells2)),
-                self._renderer.render(ScreenDef(name="celebration", cells=cells3)),
-            ]
-
-        return []
+        from baby_macropad.ui.framework.celebration import render_celebration_frames
+        return render_celebration_frames(category_color, style)
 
     def _build_context_line(self, category: str) -> str:
         dashboard = self._sm.state.dashboard

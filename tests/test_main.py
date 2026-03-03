@@ -288,24 +288,34 @@ def test_celebration_flash_renders_one_frame(controller: MacropadController):
     assert controller._dispatcher._device.set_screen_image.call_count == 1
 
 
-def test_celebration_pulse_renders_two_frames(controller: MacropadController):
-    """_play_celebration with style='pulse' should push exactly 2 frames."""
+def test_celebration_starburst_renders_two_frames(controller: MacropadController):
+    """_play_celebration with style='starburst' should push exactly 2 frames."""
     controller._dispatcher._device.set_screen_image = MagicMock()
     controller._dispatcher._play_celebration(
         category_color=(204, 170, 68),
-        style="pulse",
+        style="starburst",
     )
     assert controller._dispatcher._device.set_screen_image.call_count == 2
 
 
-def test_celebration_ripple_renders_three_frames(controller: MacropadController):
-    """_play_celebration with style='ripple' should push exactly 3 frames."""
+def test_celebration_sparkle_renders_two_frames(controller: MacropadController):
+    """_play_celebration with style='sparkle' should push exactly 2 frames."""
     controller._dispatcher._device.set_screen_image = MagicMock()
     controller._dispatcher._play_celebration(
         category_color=(102, 153, 204),
-        style="ripple",
+        style="sparkle",
     )
-    assert controller._dispatcher._device.set_screen_image.call_count == 3
+    assert controller._dispatcher._device.set_screen_image.call_count == 2
+
+
+def test_celebration_spotlight_renders_two_frames(controller: MacropadController):
+    """_play_celebration with style='spotlight' should push exactly 2 frames."""
+    controller._dispatcher._device.set_screen_image = MagicMock()
+    controller._dispatcher._play_celebration(
+        category_color=(102, 204, 102),
+        style="spotlight",
+    )
+    assert controller._dispatcher._device.set_screen_image.call_count == 2
 
 
 def test_settings_synced_on_startup(controller: MacropadController):

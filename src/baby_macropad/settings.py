@@ -32,7 +32,7 @@ class SettingsModel(BaseModel):
         default="flash",
         json_schema_extra={
             "display_label": "Celebrate",
-            "cycle_values": ["flash", "pulse", "ripple", "none"],
+            "cycle_values": ["flash", "starburst", "sparkle", "spotlight", "none"],
         },
     )
     brightness: int = Field(

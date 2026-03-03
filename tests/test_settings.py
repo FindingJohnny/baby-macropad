@@ -56,9 +56,11 @@ class TestCycleField:
         ):
             s = SettingsModel(celebration_style="flash")
             s.cycle_field("celebration_style")
-            assert s.celebration_style == "pulse"
+            assert s.celebration_style == "starburst"
             s.cycle_field("celebration_style")
-            assert s.celebration_style == "ripple"
+            assert s.celebration_style == "sparkle"
+            s.cycle_field("celebration_style")
+            assert s.celebration_style == "spotlight"
             s.cycle_field("celebration_style")
             assert s.celebration_style == "none"
             s.cycle_field("celebration_style")

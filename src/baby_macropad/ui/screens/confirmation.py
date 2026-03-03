@@ -1,22 +1,33 @@
-"""Confirmation screen factory — post-log celebration."""
+"""Confirmation screen factory — post-log celebration with compass rose."""
 
 from __future__ import annotations
 
-from ..framework.icon_cache import load_and_tint, load_composite
 from ..framework.primitives import (
     BACK_BUTTON_BG,
-    ICON_ASSETS,
     SECONDARY_TEXT,
-    SCREEN_W,
     VIS_COL_W,
     VIS_COL_X,
     VIS_ROW_H,
     VIS_ROW_Y,
     darken,
+    key_to_grid,
 )
 from ..framework.screen import CellDef, ScreenDef
-from ..framework.widgets import Card, Spacer, Text
-from ..framework.text_engine import fit_text, get_font
+from ..framework.widgets import Card, Icon, Text, TwoLineText
+
+# Cell groups for compass rose animation (expanding from center)
+_CENTER = {8}
+_CARDINAL = {7, 9, 12, 2}
+_DIAGONAL = {11, 13, 1, 3}
+_EDGES = {6, 10, 15, 5, 14, 4}
+
+# How many groups are visible per animation frame
+_FRAME_GROUPS = [
+    _CENTER,
+    _CENTER | _CARDINAL,
+    _CENTER | _CARDINAL | _DIAGONAL,
+    _CENTER | _CARDINAL | _DIAGONAL | _EDGES,  # full compass
+]
 
 
 def build_confirmation_screen(
@@ -26,59 +37,78 @@ def build_confirmation_screen(
     category_color: tuple[int, int, int],
     celebration_style: str = "color_fill",
     column_index: int = 0,
+    celebration_frame: int = 3,
 ) -> ScreenDef:
-    """Build the post-log celebration screen.
+    """Build the post-log celebration screen with compass rose.
 
-    The column fill celebration is drawn via pre_render. Icon, label, and
-    context are also pre_render since they are centered in the column and
-    across the screen — not grid-cell-aligned.
-    Key 1 is always the UNDO cell.
+    Compass rose: cells light up radially from center outward.
+    celebration_frame controls the animation stage (0=center only, 3=full).
+    Icon at key 13 (top center), label at key 8 (center),
+    context at key 3 (below center), UNDO at key 1.
     """
-    col = max(0, min(4, column_index))
+    lit_keys = _FRAME_GROUPS[min(celebration_frame, len(_FRAME_GROUPS) - 1)]
 
     def _pre_render(img, draw):
-        # Column fill celebration
-        if celebration_style == "color_fill" and 0 <= col <= 4:
-            fill_color = darken(category_color, 0.4)
-            col_x = VIS_COL_X[col]
-            col_w = VIS_COL_W[col]
-            for row in range(3):
-                ry = VIS_ROW_Y[row]
-                rh = VIS_ROW_H[row]
-                draw.rounded_rectangle(
-                    [col_x, ry, col_x + col_w, ry + rh],
-                    radius=6,
-                    fill=fill_color,
-                )
+        # Draw compass rose glow — cells light up based on animation frame
+        for key in lit_keys:
+            grid = key_to_grid(key)
+            if not grid:
+                continue
+            col, row = grid
+            cx = VIS_COL_X[col]
+            cy = VIS_ROW_Y[row]
+            cw = VIS_COL_W[col]
+            ch = VIS_ROW_H[row]
 
-        # Icon in top cell of column
-        icon_size = 36
-        asset = ICON_ASSETS.get(icon_name, icon_name)
-        tinted = None
-        if isinstance(asset, tuple):
-            tinted = load_composite(asset[0], asset[1], (255, 255, 255), icon_size)
-        else:
-            tinted = load_and_tint(asset, (255, 255, 255), icon_size)
-        if tinted:
-            ix = VIS_COL_X[col] + (VIS_COL_W[col] - icon_size) // 2
-            iy = VIS_ROW_Y[0] + (VIS_ROW_H[0] - icon_size) // 2
-            img.paste(tinted, (ix, iy), tinted)
+            # Brightness varies by distance from center
+            if key in _CENTER:
+                fill = darken(category_color, 0.7)
+            elif key in _CARDINAL:
+                fill = darken(category_color, 0.5)
+            elif key in _DIAGONAL:
+                fill = darken(category_color, 0.35)
+            else:
+                fill = darken(category_color, 0.25)
 
-        # Action label in middle cell of column (auto-shrink to fit)
-        col_w = VIS_COL_W[col]
-        label_font, display_label, lw, lh = fit_text(draw, action_label, col_w - 4, VIS_ROW_H[1], (14, 12, 10))
-        lx = VIS_COL_X[col] + (col_w - lw) // 2
-        ly = VIS_ROW_Y[1] + (VIS_ROW_H[1] - lh) // 2
-        draw.text((lx, ly), display_label, fill=(255, 255, 255), font=label_font)
-
-        # Context line full-width in bottom row (auto-shrink to fit)
-        if context_line:
-            context_font, display_context, cw, ch = fit_text(draw, context_line, SCREEN_W - 20, VIS_ROW_H[2], (11, 10, 9))
-            cx = (SCREEN_W - cw) // 2
-            cy = VIS_ROW_Y[2] + (VIS_ROW_H[2] - ch) // 2
-            draw.text((cx, cy), display_context, fill=SECONDARY_TEXT, font=context_font)
+            draw.rounded_rectangle(
+                [cx, cy, cx + cw, cy + ch],
+                radius=6,
+                fill=fill,
+            )
 
     cells: dict[int, CellDef] = {}
+
+    # Icon at key 13 (top center)
+    cells[13] = CellDef(
+        widget=Icon(asset_name=icon_name, color=(255, 255, 255), size=36),
+        key_num=13,
+    )
+
+    # Action label at key 8 (center) — supports newline for two-line labels
+    if "\n" in action_label:
+        parts = action_label.split("\n", 1)
+        label_widget = TwoLineText(
+            line1=parts[0],
+            line2=parts[1],
+            color1=(255, 255, 255),
+            color2=(255, 255, 255),
+            font_sizes1=(14, 12, 10),
+            font_sizes2=(14, 12, 10),
+        )
+    else:
+        label_widget = Text(
+            text=action_label, color=(255, 255, 255), font_sizes=(18, 14, 12)
+        )
+    cells[8] = CellDef(widget=label_widget, key_num=8)
+
+    # Context line at key 3 (below center)
+    if context_line:
+        cells[3] = CellDef(
+            widget=Text(
+                text=context_line, color=SECONDARY_TEXT, font_sizes=(11, 10, 9)
+            ),
+            key_num=3,
+        )
 
     # UNDO button at key 1
     cells[1] = CellDef(

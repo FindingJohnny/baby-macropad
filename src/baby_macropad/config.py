@@ -11,26 +11,35 @@ import yaml
 from pydantic import BaseModel, Field, field_validator
 
 
-def _resolve_env_vars(value: str) -> str:
-    """Replace ${VAR_NAME} with environment variable values."""
+def _resolve_env_vars(value: str, strict: bool = True) -> str:
+    """Replace ${VAR_NAME} with environment variable values.
+
+    If strict=False, unset vars resolve to empty string instead of raising.
+    """
     pattern = re.compile(r"\$\{(\w+)\}")
     def replacer(match: re.Match) -> str:
         var_name = match.group(1)
         env_val = os.environ.get(var_name)
         if env_val is None:
-            raise ValueError(f"Environment variable {var_name} is not set")
+            if strict:
+                raise ValueError(f"Environment variable {var_name} is not set")
+            return ""
         return env_val
     return pattern.sub(replacer, value)
 
 
-def _resolve_env_recursive(data: Any) -> Any:
+def _resolve_env_recursive(data: Any, strict: bool = True) -> Any:
     """Walk a nested dict/list and resolve env vars in string values."""
     if isinstance(data, str):
-        return _resolve_env_vars(data)
+        return _resolve_env_vars(data, strict=strict)
     if isinstance(data, dict):
-        return {k: _resolve_env_recursive(v) for k, v in data.items()}
+        # Resolve disabled sections (enabled: false) non-strictly
+        section_strict = strict
+        if isinstance(data.get("enabled"), bool) and not data["enabled"]:
+            section_strict = False
+        return {k: _resolve_env_recursive(v, strict=section_strict) for k, v in data.items()}
     if isinstance(data, list):
-        return [_resolve_env_recursive(item) for item in data]
+        return [_resolve_env_recursive(item, strict=strict) for item in data]
     return data
 
 
@@ -90,6 +99,7 @@ class NoteCategoryConfig(BaseModel):
     label: str
     content: str = ""
     icon: str = ""
+    api_category: str = "other"  # pumping | health | medication | other
 
 
 class BrightnessScheduleConfig(BaseModel):

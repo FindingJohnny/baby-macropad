@@ -123,6 +123,13 @@ def test_dispatch_ha_action_is_noop(controller: MacropadController):
     assert result is None
 
 
+def test_key_press_enters_detail(controller: MacropadController):
+    """Pressing PEE button enters detail screen for pre-confirmation."""
+    # Physical key 2 → remapped to logical key 12 (PEE)
+    controller._on_key_press(2, True)
+    assert controller._sm.mode == "detail"
+
+
 @respx.mock
 def test_key_press_success(controller: MacropadController):
     respx.post(f"{BASE}/diapers").mock(
@@ -132,8 +139,12 @@ def test_key_press_success(controller: MacropadController):
         return_value=Response(200, json={"dashboard": {}})
     )
 
-    controller._device.set_key_callback(controller._on_key_press)
-    controller._on_key_press(12, True)  # Pee (instant action, no detail screen)
+    # Physical key 2 → logical 12 (PEE) → enters detail
+    controller._on_key_press(2, True)
+    assert controller._sm.mode == "detail"
+
+    # Simulate timer expiry → commits default option → API called
+    controller._commit_detail_default()
 
     # Verify the API was called
     assert respx.routes[0].called
@@ -144,7 +155,12 @@ def test_key_press_offline_queues_event(controller: MacropadController):
     respx.post(f"{BASE}/diapers").mock(side_effect=ConnectionError("No network"))
     respx.get(f"{BASE}/dashboard").mock(side_effect=ConnectionError("No network"))
 
-    controller._on_key_press(12, True)  # Pee (instant action)
+    # Physical key 2 → logical 12 (PEE) → enters detail
+    controller._on_key_press(2, True)
+    assert controller._sm.mode == "detail"
+
+    # Simulate timer expiry → commits default option → queued offline
+    controller._commit_detail_default()
 
     # Wait briefly for background refresh thread to finish
     import time
@@ -159,15 +175,31 @@ def test_key_press_offline_queues_event(controller: MacropadController):
 def test_key_release_ignored(controller: MacropadController):
     """Key release events should not trigger actions."""
     controller._dispatch_action = MagicMock()
-    controller._on_key_press(12, False)  # Release
+    controller._on_key_press(2, False)  # Release (physical key 2 → logical 12)
     controller._dispatch_action.assert_not_called()
 
 
 def test_unconfigured_key_ignored(controller: MacropadController):
     """Pressing a key not in the config should be a no-op."""
     controller._dispatch_action = MagicMock()
-    controller._on_key_press(5, True)  # Key 5 not in test config
+    # Physical key 9 → remapped to logical key 9 (middle row, not in config)
+    controller._on_key_press(9, True)
     controller._dispatch_action.assert_not_called()
+
+
+def test_remap_key_swaps_top_bottom_rows():
+    """Physical top row (1-5) maps to logical top (11-15) and vice versa."""
+    remap = MacropadController._remap_key
+    # Top row physical → logical
+    assert remap(1) == 11
+    assert remap(2) == 12
+    assert remap(5) == 15
+    # Middle row unchanged
+    assert remap(6) == 6
+    assert remap(10) == 10
+    # Bottom row physical → logical
+    assert remap(11) == 1
+    assert remap(15) == 5
 
 
 def test_controller_stop(controller: MacropadController):

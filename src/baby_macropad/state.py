@@ -14,6 +14,7 @@ ScreenMode = Literal[
     "detail",
     "confirmation",
     "sleep_mode",
+    "wake_confirm",
     "notes_submenu",
     "settings",
 ]
@@ -45,6 +46,13 @@ class DisplayState:
     sleep_active: bool = False
     sleep_start_time: str | None = None  # ISO timestamp from API
     sleep_id: str | None = None  # Active sleep resource ID
+
+    # Wake confirmation (pre-confirm before ending sleep)
+    wake_confirm_expires: float = 0.0
+    wake_confirm_from_sleep: bool = False  # True if entered from sleep_mode
+
+    # ID of sleep we just ended (prevents dashboard from re-activating it)
+    ended_sleep_id: str | None = None
 
     # Live data (from dashboard API)
     dashboard: object | None = None
@@ -106,11 +114,19 @@ class DisplayState:
         self.sleep_id = sleep_id
         self.sleep_start_time = start_time
 
-    def exit_sleep_mode(self) -> None:
+    def exit_sleep_mode(self, ended_id: str | None = None) -> None:
         """Clear sleep state (caller transitions to confirmation or home)."""
         self.sleep_active = False
-        self.sleep_id = None
         self.sleep_start_time = None
+        if ended_id or self.sleep_id:
+            self.ended_sleep_id = ended_id or self.sleep_id
+        self.sleep_id = None
+
+    def enter_wake_confirm(self, expires: float, from_sleep: bool = False) -> None:
+        """Transition to wake confirmation screen (pre-confirm before ending sleep)."""
+        self.mode = "wake_confirm"
+        self.wake_confirm_expires = expires
+        self.wake_confirm_from_sleep = from_sleep
 
     def return_home(self) -> None:
         """Return to home grid, clearing transient screen state."""
@@ -123,6 +139,8 @@ class DisplayState:
         self.confirmation_expires = 0.0
         self.confirmation_resource_id = None
         self.confirmation_resource_type = None
+        self.wake_confirm_expires = 0.0
+        self.wake_confirm_from_sleep = False
 
     def push_recent_action(self, action: dict) -> None:
         """Track a recent action for undo in settings (max 5)."""

@@ -93,6 +93,12 @@ class StateMachine:
                 # Refresh countdown display
                 return TickAction(action="refresh", mode="detail")
 
+            # Wake confirmation: auto-confirm on timer expiry
+            if s.mode == "wake_confirm":
+                if s.wake_confirm_expires > 0 and now >= s.wake_confirm_expires:
+                    return TickAction(action="wake_confirm_expired", mode="wake_confirm")
+                return TickAction(action="refresh", mode="wake_confirm")
+
             # Sleep mode: refresh elapsed timer
             if s.mode == "sleep_mode":
                 return TickAction(action="refresh", mode="sleep_mode")
@@ -130,13 +136,17 @@ class StateMachine:
                 column, expires, resource_id, resource_type,
             )
 
+    def enter_wake_confirm(self, expires: float, from_sleep: bool = False) -> None:
+        with self._lock:
+            self._state.enter_wake_confirm(expires, from_sleep)
+
     def enter_sleep_mode(self, sleep_id: str, start_time: str) -> None:
         with self._lock:
             self._state.enter_sleep_mode(sleep_id, start_time)
 
-    def exit_sleep_mode(self) -> None:
+    def exit_sleep_mode(self, ended_id: str | None = None) -> None:
         with self._lock:
-            self._state.exit_sleep_mode()
+            self._state.exit_sleep_mode(ended_id=ended_id)
 
     def return_home(self) -> None:
         with self._lock:
@@ -198,3 +208,33 @@ class StateMachine:
                 a for a in self._state.recent_actions
                 if a.get("resource_id") != resource_id
             ]
+
+    def enter_settings(self) -> None:
+        with self._lock:
+            self._state.mode = "settings"
+
+    def enter_notes_submenu(self) -> None:
+        with self._lock:
+            self._state.mode = "notes_submenu"
+
+    def resume_sleep_mode(self) -> None:
+        with self._lock:
+            self._state.mode = "sleep_mode"
+
+    def sync_settings(
+        self, timer_seconds: int, celebration_style: str, skip_breast_detail: bool
+    ) -> None:
+        with self._lock:
+            self._state.timer_seconds = timer_seconds
+            self._state.celebration_style = celebration_style
+            self._state.skip_breast_detail = skip_breast_detail
+
+    def sync_sleep_active(self, sleep_active: bool, sleep_id: str, start_time: str | None) -> None:
+        with self._lock:
+            self._state.sleep_active = sleep_active
+            self._state.sleep_id = sleep_id
+            self._state.sleep_start_time = start_time
+
+    def clear_ended_sleep(self) -> None:
+        with self._lock:
+            self._state.ended_sleep_id = None

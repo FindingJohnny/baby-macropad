@@ -112,18 +112,23 @@ notes_categories:
   - label: "Pump"
     content: "Pumping session"
     icon: "pump"
+    api_category: "pumping"
   - label: "Meds"
     content: "Medication given"
     icon: "pill"
+    api_category: "medication"
   - label: "Temp"
     content: "Temperature taken"
     icon: "thermometer"
+    api_category: "health"
   - label: "Milstn"
     content: "Milestone logged"
     icon: "star"
+    api_category: "other"
   - label: "General"
     content: "Quick note logged"
     icon: "note"
+    api_category: "other"
 
 # Display management
 display:

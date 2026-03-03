@@ -36,10 +36,7 @@ def build_home_grid(
         if is_sleep_active:
             # Active sleep: sunrise icon + WAKE UP + elapsed time
             elapsed = state.split(":", 1)[1] if ":" in state else ""
-            wake_label = "WAKE UP"
-            if elapsed:
-                wake_label = f"WAKE UP\n{elapsed}"
-            card_bg = darken(color, 0.12)
+            card_bg = darken(color, 0.15)
             widget = Card(
                 fill=card_bg,
                 child=IconLabel(

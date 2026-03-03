@@ -16,27 +16,30 @@ import signal
 import sys
 import threading
 import time
-from datetime import datetime, time as dt_time, timezone
+from datetime import datetime, timezone
+from datetime import time as dt_time
 from typing import Any
+
+import httpx
 
 from baby_macropad.actions.baby_basics import BabyBasicsAPIError, BabyBasicsClient, DashboardData
 from baby_macropad.config import MacropadConfig, load_config
 from baby_macropad.device import StreamDockDevice, StubDevice
 from baby_macropad.offline.queue import OfflineQueue
 from baby_macropad.offline.sync import SyncWorker
+from baby_macropad.settings import SettingsModel
 from baby_macropad.state import DisplayState
 from baby_macropad.ui.framework.screen import ScreenRenderer
 from baby_macropad.ui.key_router import KeyRouter
 from baby_macropad.ui.led import LedController
-from baby_macropad.ui.state_machine import StateMachine
-from baby_macropad.ui.screens.home import build_home_grid
-from baby_macropad.ui.screens.detail import build_detail_screen
 from baby_macropad.ui.screens.confirmation import build_confirmation_screen
+from baby_macropad.ui.screens.dashboard_screen import build_dashboard_screen
+from baby_macropad.ui.screens.detail import build_detail_screen
+from baby_macropad.ui.screens.home import build_home_grid
 from baby_macropad.ui.screens.selection import build_selection_screen
 from baby_macropad.ui.screens.settings_screen import build_settings_screen
 from baby_macropad.ui.screens.sleep_screen import build_sleep_screen
-from baby_macropad.ui.screens.dashboard_screen import build_dashboard_screen
-from baby_macropad.settings import SettingsModel
+from baby_macropad.ui.state_machine import StateMachine
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +48,10 @@ CONFIRMATION_DURATION = 5.0
 # Detail screen configurations (maps action key → options, API action, params)
 DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
     "breast_left": {
-        "title": "LEFT BREAST",
+        "title": "LEFT",
         "options": [
-            {"label": "One", "key": 11, "value": {"both_sides": False}},
-            {"label": "Both", "key": 12, "value": {"both_sides": True}},
+            {"label": "One", "key": 12, "value": {"both_sides": False}},
+            {"label": "Both", "key": 13, "value": {"both_sides": True}},
         ],
         "default_index": 0,
         "category_color": (102, 204, 102), "category": "feeding",
@@ -58,10 +61,10 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
         "resource_type": "feedings", "column": 0,
     },
     "breast_right": {
-        "title": "RIGHT BREAST",
+        "title": "RIGHT",
         "options": [
-            {"label": "One", "key": 11, "value": {"both_sides": False}},
-            {"label": "Both", "key": 12, "value": {"both_sides": True}},
+            {"label": "One", "key": 12, "value": {"both_sides": False}},
+            {"label": "Both", "key": 13, "value": {"both_sides": True}},
         ],
         "default_index": 0,
         "category_color": (102, 204, 102), "category": "feeding",
@@ -73,9 +76,9 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
     "bottle": {
         "title": "BOTTLE",
         "options": [
-            {"label": "Formula", "key": 11, "value": {"source": "formula"}},
-            {"label": "Brst Milk", "key": 12, "value": {"source": "breast_milk"}},
-            {"label": "Skip", "key": 13, "value": {}},
+            {"label": "Formula", "key": 12, "value": {"source": "formula"}},
+            {"label": "Brst Milk", "key": 13, "value": {"source": "breast_milk"}},
+            {"label": "Skip", "key": 14, "value": {}},
         ],
         "default_index": 0,
         "category_color": (102, 204, 102), "category": "feeding",
@@ -83,6 +86,18 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
         "base_params": {"type": "bottle"},
         "confirmation_label": "Bottle", "confirmation_icon": "bottle",
         "resource_type": "feedings", "column": 0,
+    },
+    "pee": {
+        "title": "PEE",
+        "options": [
+            {"label": "Log", "key": 13, "value": {}},
+        ],
+        "default_index": 0,
+        "category_color": (204, 170, 68), "category": "diaper",
+        "api_action": "baby_basics.log_diaper",
+        "base_params": {"type": "pee"},
+        "confirmation_label": "Pee", "confirmation_icon": "diaper_pee",
+        "resource_type": "diapers", "column": 1,
     },
     "poop": {
         "title": "POOP",
@@ -111,16 +126,16 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
         "category_color": (204, 170, 68), "category": "diaper",
         "api_action": "baby_basics.log_diaper",
         "base_params": {"type": "both"},
-        "confirmation_label": "Pee+Poop", "confirmation_icon": "diaper_both",
+        "confirmation_label": "Pee +\nPoop", "confirmation_icon": "diaper_both",
         "resource_type": "diapers", "column": 1,
     },
 }
 
 _ICON_TO_DETAIL: dict[str, str] = {
     "breast_left": "breast_left", "breast_right": "breast_right",
-    "bottle": "bottle", "diaper_poop": "poop", "diaper_both": "both",
+    "bottle": "bottle", "diaper_pee": "pee", "diaper_poop": "poop", "diaper_both": "both",
 }
-_INSTANT_ACTIONS: set[str] = {"diaper_pee"}
+_INSTANT_ACTIONS: set[str] = set()
 _KEY_TO_COLUMN: dict[int, int] = {
     11: 0, 6: 0, 1: 0, 12: 1, 7: 1, 2: 1, 13: 2, 8: 2, 3: 2,
     14: 3, 9: 3, 4: 3, 15: 4, 10: 4, 5: 4,
@@ -182,8 +197,16 @@ class MacropadController:
 
     def start(self) -> None:
         logger.info("Starting macropad controller")
-        if not self._device.open():
-            logger.info("Using stub device (no hardware found)")
+        # Retry device discovery for up to 30s (USB may not be ready at boot)
+        max_retries = 10
+        for attempt in range(1, max_retries + 1):
+            if self._device.open():
+                break
+            if attempt < max_retries:
+                logger.info("Device not found, retrying (%d/%d)...", attempt, max_retries)
+                time.sleep(3)
+        else:
+            logger.info("Using stub device (no hardware found after %d attempts)", max_retries)
             self._device = StubDevice()
             self._device.open()
             self._led = LedController(self._device)
@@ -229,19 +252,31 @@ class MacropadController:
         if s.mode == "sleep_mode":
             elapsed, start_str = self._calc_sleep_elapsed()
             screen = build_sleep_screen(elapsed, start_str)
+        elif s.mode == "wake_confirm" and now < s.wake_confirm_expires:
+            elapsed, _ = self._calc_sleep_elapsed()
+            elapsed_text = f"{elapsed // 60}h {elapsed % 60}m" if elapsed >= 60 else f"{elapsed}m"
+            screen = build_detail_screen(
+                title="End Sleep?",
+                options=[{"label": "WAKE", "key_num": 13, "selected": True}],
+                timer_seconds=max(0, int(s.wake_confirm_expires - now)),
+                category_color=(102, 153, 204),
+                hint="Wake Up",
+                subtitle=elapsed_text,
+            )
         elif s.mode == "confirmation" and now < s.confirmation_expires:
             screen = build_confirmation_screen(
                 s.confirmation_label, s.confirmation_context,
                 s.confirmation_icon, s.confirmation_category_color,
-                s.celebration_style, s.confirmation_column,
+                s.celebration_style,
             )
-        elif s.mode == "detail" and now < s.detail_timer_expires:
+        elif s.mode == "detail" and (s.detail_timer_expires == 0.0 or now < s.detail_timer_expires):
             cfg = DETAIL_CONFIGS.get(s.detail_action or "")
             opts = [{"label": o["label"], "key_num": o.get("key", 11 + i), "selected": i == s.detail_default_index}
                     for i, o in enumerate(s.detail_options)]
+            remaining = max(0, int(s.detail_timer_expires - now)) if s.detail_timer_expires > 0 else 0
             screen = build_detail_screen(
                 cfg["title"] if cfg else "DETAIL", opts,
-                max(0, int(s.detail_timer_expires - now)),
+                remaining,
                 cfg["category_color"] if cfg else (200, 200, 200),
             )
         elif s.mode == "notes_submenu":
@@ -256,8 +291,12 @@ class MacropadController:
             screen = build_home_grid(self.config.buttons, runtime_state)
 
         self._router.set_screen(screen)
-        jpeg = self._renderer.render(screen)
-        self._device.set_screen_image(jpeg)
+        try:
+            jpeg = self._renderer.render(screen)
+            self._device.set_screen_image(jpeg)
+            logger.info("Display refreshed: mode=%s, %d bytes", s.mode, len(jpeg))
+        except Exception:
+            logger.exception("Failed to refresh display")
 
     def _calc_sleep_elapsed(self) -> tuple[int, str]:
         start_time = self._sm.get_sleep_start_time()
@@ -295,9 +334,26 @@ class MacropadController:
 
     # --- Key handling ---
 
+    @staticmethod
+    def _remap_key(key: int) -> int:
+        """Remap physical key codes — top/bottom rows are swapped on hardware.
+
+        The StreamDock M18 sends keys 1-5 for the TOP physical row and
+        keys 11-15 for the BOTTOM row, but the code and config use the
+        opposite convention (11-15=top, 1-5=bottom). This swaps them so
+        the visual layout matches the physical buttons.
+        """
+        if 1 <= key <= 5:
+            return key + 10
+        elif 11 <= key <= 15:
+            return key - 10
+        return key
+
     def _on_key_press(self, key: int, is_pressed: bool) -> None:
         if not is_pressed:
             return
+
+        key = self._remap_key(key)
 
         snap = self._sm.try_handle_key(key)
         if snap is None:
@@ -314,6 +370,8 @@ class MacropadController:
             self._handle_confirmation_press(key, snap)
         elif snap.mode == "sleep_mode":
             self._handle_sleep_mode_press(key)
+        elif snap.mode == "wake_confirm":
+            self._handle_wake_confirm_press(key)
         elif snap.mode == "notes_submenu":
             self._handle_notes_submenu_press(key)
         elif snap.mode == "settings":
@@ -324,10 +382,10 @@ class MacropadController:
         if not button:
             return
         if button.action == "macropad.settings":
-            self._sm.state.mode = "settings"
+            self._sm.enter_settings()
             self.refresh_display()
         elif button.action == "baby_basics.notes_submenu":
-            self._sm.state.mode = "notes_submenu"
+            self._sm.enter_notes_submenu()
             self.refresh_display()
         elif button.action == "baby_basics.toggle_sleep":
             self._handle_sleep_toggle()
@@ -365,9 +423,31 @@ class MacropadController:
     def _handle_sleep_mode_press(self, key: int) -> None:
         self._device.set_brightness(self.config.device.brightness)
         if key == 13:
-            self._handle_wake_up()
+            self._enter_wake_confirm(from_sleep=True)
         else:
             self.refresh_display()
+
+    def _handle_wake_confirm_press(self, key: int) -> None:
+        if key == 1:
+            # BACK → return to where we came from
+            if self._sm.state.wake_confirm_from_sleep:
+                self._sm.resume_sleep_mode()
+                self._device.set_brightness(10)
+            else:
+                self._sm.return_home()
+            self.refresh_display()
+            return
+        if key == 13:
+            # Confirm → end sleep
+            self._handle_wake_up()
+            return
+
+    def _enter_wake_confirm(self, from_sleep: bool = False) -> None:
+        """Show wake confirmation screen before ending sleep."""
+        timer = self._sm.state.timer_seconds
+        expires = time.monotonic() + (timer if timer > 0 else 7)
+        self._sm.enter_wake_confirm(expires, from_sleep)
+        self.refresh_display()
 
     def _handle_notes_submenu_press(self, key: int) -> None:
         if key == 1:
@@ -379,7 +459,7 @@ class MacropadController:
             if i >= len(option_keys):
                 break
             if key == option_keys[i]:
-                self._execute_note_action(cat.content or cat.label, cat.label)
+                self._execute_note_action(cat.content or cat.label, cat.label, getattr(cat, "api_category", "other"))
                 return
 
     def _handle_settings_press(self, key: int) -> None:
@@ -395,9 +475,11 @@ class MacropadController:
             if i < len(setting_keys) and key == setting_keys[i]:
                 self._settings.cycle_field(field_name)
                 # Sync timer_seconds and other settings to state
-                self._sm.state.timer_seconds = self._settings.timer_duration_seconds
-                self._sm.state.celebration_style = self._settings.celebration_style
-                self._sm.state.skip_breast_detail = self._settings.skip_breast_detail
+                self._sm.sync_settings(
+                    self._settings.timer_duration_seconds,
+                    self._settings.celebration_style,
+                    self._settings.skip_breast_detail,
+                )
                 # Apply brightness immediately if that's what changed
                 self._device.set_brightness(self._settings.brightness)
                 self.refresh_display()
@@ -410,7 +492,7 @@ class MacropadController:
         if not cfg:
             return
         timer = self._sm.state.timer_seconds
-        expires = time.monotonic() + timer if timer > 0 else float("inf")
+        expires = time.monotonic() + timer if timer > 0 else 0.0
         self._sm.enter_detail(detail_key, cfg["options"], cfg["default_index"], dict(cfg["base_params"]), expires)
         self.refresh_display()
 
@@ -445,8 +527,12 @@ class MacropadController:
         color = {"feeding": (102, 204, 102), "diaper": (204, 170, 68)}.get(cat, (200, 200, 200))
         self._call_api_and_confirm(button.action, dict(button.params), label, icon_name, color, cat, column, rtype)
 
-    def _execute_note_action(self, content: str, label: str) -> None:
-        self._call_api_and_confirm("baby_basics.log_note", {"content": content}, label, "note", (153, 153, 153), "note", 2, "notes")
+    def _execute_note_action(self, content: str, label: str, category: str = "other") -> None:
+        self._call_api_and_confirm(
+            "baby_basics.log_note",
+            {"category": category, "title": label, "text": content},
+            label, "note", (153, 153, 153), "note", 2, "notes",
+        )
 
     def _call_api_and_confirm(self, api_action: str, params: dict, label: str, icon: str,
                               category_color: tuple[int, int, int], category: str, column: int, resource_type: str) -> None:
@@ -463,10 +549,12 @@ class MacropadController:
                     resource_id = result.get("id")
             context_line = self._build_context_line(category)
             self._led.flash_category(category)
-        except (BabyBasicsAPIError, ConnectionError, Exception) as e:
+        except (
+            BabyBasicsAPIError, ConnectionError, httpx.TimeoutException, httpx.ConnectError
+        ) as e:
             logger.warning("Action failed, queueing offline: %s", e)
             self.queue.enqueue(api_action, params)
-            context_line = "Queued — will sync when connected"
+            context_line = "Queued"
             self._led.flash_queued()
 
         if resource_id:
@@ -474,8 +562,26 @@ class MacropadController:
                                          "label": label, "timestamp": datetime.now(timezone.utc).isoformat()})
         self._sm.enter_confirmation(api_action, label, context_line, icon, category_color, column,
                                     time.monotonic() + CONFIRMATION_DURATION, resource_id, resource_type)
+        self._play_celebration(category_color, icon, label, context_line,
+                               self._sm.state.celebration_style)
         self.refresh_display()
         threading.Thread(target=self._refresh_dashboard, daemon=True).start()
+
+    def _play_celebration(self, category_color: tuple[int, int, int], icon: str,
+                          label: str, context: str, style: str) -> None:
+        """Play 4-frame compass rose expansion animation (~500ms total)."""
+        for frame_idx in range(4):
+            try:
+                screen = build_confirmation_screen(
+                    label, context, icon, category_color, style,
+                    celebration_frame=frame_idx,
+                )
+                jpeg = self._renderer.render(screen)
+                self._device.set_screen_image(jpeg)
+                time.sleep(0.12)
+            except Exception:
+                logger.exception("Celebration frame %d failed", frame_idx)
+                break
 
     def _build_context_line(self, category: str) -> str:
         dashboard = self._sm.state.dashboard
@@ -484,11 +590,11 @@ class MacropadController:
         counts = dashboard.today_counts
         if category == "feeding":
             side = dashboard.suggested_side
-            return f"Next: {side.capitalize()} breast" if side else f"{counts.get('feedings', 0)} feeds today"
+            return f"Next: {side[0].upper()}" if side else f"{counts.get('feedings', 0)} feeds"
         elif category == "diaper":
-            return f"{counts.get('diapers', 0)} diapers today"
+            return f"{counts.get('diapers', 0)} diapers"
         elif category == "pump":
-            return "Pumping session logged"
+            return "Pumped"
         return ""
 
     # --- Sleep ---
@@ -499,14 +605,21 @@ class MacropadController:
         if active:
             sleep_id = dashboard.active_sleep.get("id")
             if sleep_id:
-                self._end_sleep(sleep_id)
+                # Store sleep state for wake confirmation flow
+                if not self._sm.state.sleep_active:
+                    self._sm.sync_sleep_active(
+                        True, sleep_id, dashboard.active_sleep.get("start_time")
+                    )
+                self._enter_wake_confirm()
             return
         try:
             result = self.api_client.start_sleep()
             data = result.get("sleep", result)
             self._sm.enter_sleep_mode(data.get("id", ""), data.get("start_time", datetime.now(timezone.utc).isoformat()))
             self._led.flash_sleep_start()
-        except (BabyBasicsAPIError, ConnectionError, Exception) as e:
+        except (
+            BabyBasicsAPIError, ConnectionError, httpx.TimeoutException, httpx.ConnectError
+        ) as e:
             logger.warning("Failed to start sleep: %s", e)
             self.queue.enqueue("baby_basics.toggle_sleep", {})
             self._sm.enter_sleep_mode("pending", datetime.now(timezone.utc).isoformat())
@@ -528,11 +641,13 @@ class MacropadController:
             self.api_client.end_sleep(sleep_id)
             start_time = self._sm.get_sleep_start_time()
             duration_str = self._calc_duration_str(start_time)
-            self._sm.exit_sleep_mode()
+            self._sm.exit_sleep_mode(ended_id=sleep_id)
             self._led.flash_wake()
             self._sm.enter_confirmation("baby_basics.end_sleep", "Awake!", duration_str,
                                         "sunrise", (255, 220, 150), 2, time.monotonic() + CONFIRMATION_DURATION, None, "sleeps")
-        except (BabyBasicsAPIError, ConnectionError, Exception) as e:
+        except (
+            BabyBasicsAPIError, ConnectionError, httpx.TimeoutException, httpx.ConnectError
+        ) as e:
             logger.warning("Failed to end sleep: %s", e)
             self._sm.exit_sleep_mode()
             self._sm.return_home()
@@ -563,7 +678,9 @@ class MacropadController:
         try:
             self._delete_resource(rtype, rid)
             self._led.flash_undo()
-        except Exception as e:
+        except (
+            BabyBasicsAPIError, ConnectionError, httpx.TimeoutException, httpx.ConnectError
+        ) as e:
             logger.warning("Undo failed, queueing: %s", e)
             self.queue.enqueue(f"baby_basics.delete_{rtype}", {"resource_id": rid})
             self._led.flash_queued()
@@ -574,7 +691,7 @@ class MacropadController:
 
     def _delete_resource(self, resource_type: str, resource_id: str) -> None:
         resp = self.api_client._client.delete(f"/{resource_type}/{resource_id}")
-        if resp.status_code >= 400 and resp.status_code != 204:
+        if resp.status_code >= 400:
             raise BabyBasicsAPIError(resp.status_code, resp.text)
 
     def _dispatch_action(self, action: str, params: dict) -> Any:
@@ -598,7 +715,15 @@ class MacropadController:
             dashboard = self.api_client.get_dashboard()
             self._sm.set_dashboard(dashboard, True, self.queue.count())
             if dashboard.active_sleep and not self._sm.state.sleep_active and self._sm.mode == "home_grid":
-                self._sm.set_sleep_from_dashboard(dashboard.active_sleep.get("id"), dashboard.active_sleep.get("start_time"))
+                sleep_id = dashboard.active_sleep.get("id")
+                # Don't re-activate a sleep we just ended (API may lag behind)
+                if sleep_id and sleep_id == self._sm.state.ended_sleep_id:
+                    logger.debug("Ignoring ended sleep %s still in dashboard", sleep_id[:8])
+                else:
+                    self._sm.set_sleep_from_dashboard(sleep_id, dashboard.active_sleep.get("start_time"))
+            # Clear ended_sleep_id once dashboard confirms it's gone
+            if not dashboard.active_sleep and self._sm.state.ended_sleep_id:
+                self._sm.clear_ended_sleep()
         except Exception:
             self._sm.set_connected(False)
 
@@ -621,6 +746,8 @@ class MacropadController:
                 self.refresh_display()
             elif tick.action == "detail_expired":
                 self._commit_detail_default()
+            elif tick.action == "wake_confirm_expired":
+                self._handle_wake_up()
             elif tick.action == "refresh":
                 self.refresh_display()
             elif tick.mode == "home_grid":

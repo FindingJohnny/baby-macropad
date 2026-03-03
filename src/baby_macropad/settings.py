@@ -35,6 +35,15 @@ class SettingsModel(BaseModel):
             "cycle_values": ["flash", "starburst", "sparkle", "spotlight", "none"],
         },
     )
+    confirmation_layout: str = Field(
+        default="banner",
+        json_schema_extra={
+            "display_label": "Confirm",
+            "cycle_values": [
+                "banner", "center_stage", "full_icon", "split", "minimal",
+            ],
+        },
+    )
     brightness: int = Field(
         default=80,
         json_schema_extra={

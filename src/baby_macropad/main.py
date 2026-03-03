@@ -20,9 +20,10 @@ from datetime import datetime, timezone
 from datetime import time as dt_time
 from typing import Any
 
-import httpx
-
-from baby_macropad.actions.baby_basics import BabyBasicsAPIError, BabyBasicsClient, DashboardData
+from baby_macropad.actions.baby_basics import BabyBasicsClient, DashboardData
+from baby_macropad.actions.dispatcher import DETAIL_CONFIGS, ActionDispatcher
+from baby_macropad.actions.sleep_manager import SleepManager
+from baby_macropad.actions.undo import UndoManager
 from baby_macropad.config import MacropadConfig, load_config
 from baby_macropad.device import StreamDockDevice, StubDevice
 from baby_macropad.offline.queue import OfflineQueue
@@ -45,99 +46,9 @@ logger = logging.getLogger(__name__)
 
 CONFIRMATION_DURATION = 5.0
 
-# Detail screen configurations (maps action key → options, API action, params)
-DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
-    "breast_left": {
-        "title": "LEFT",
-        "options": [
-            {"label": "One", "key": 12, "value": {"both_sides": False}},
-            {"label": "Both", "key": 13, "value": {"both_sides": True}},
-        ],
-        "default_index": 0,
-        "category_color": (102, 204, 102), "category": "feeding",
-        "api_action": "baby_basics.log_feeding",
-        "base_params": {"type": "breast", "started_side": "left"},
-        "confirmation_label": "Fed L", "confirmation_icon": "breast_left",
-        "resource_type": "feedings", "column": 0,
-    },
-    "breast_right": {
-        "title": "RIGHT",
-        "options": [
-            {"label": "One", "key": 12, "value": {"both_sides": False}},
-            {"label": "Both", "key": 13, "value": {"both_sides": True}},
-        ],
-        "default_index": 0,
-        "category_color": (102, 204, 102), "category": "feeding",
-        "api_action": "baby_basics.log_feeding",
-        "base_params": {"type": "breast", "started_side": "right"},
-        "confirmation_label": "Fed R", "confirmation_icon": "breast_right",
-        "resource_type": "feedings", "column": 0,
-    },
-    "bottle": {
-        "title": "BOTTLE",
-        "options": [
-            {"label": "Formula", "key": 12, "value": {"source": "formula"}},
-            {"label": "Brst Milk", "key": 13, "value": {"source": "breast_milk"}},
-            {"label": "Skip", "key": 14, "value": {}},
-        ],
-        "default_index": 0,
-        "category_color": (102, 204, 102), "category": "feeding",
-        "api_action": "baby_basics.log_feeding",
-        "base_params": {"type": "bottle"},
-        "confirmation_label": "Bottle", "confirmation_icon": "bottle",
-        "resource_type": "feedings", "column": 0,
-    },
-    "pee": {
-        "title": "PEE",
-        "options": [
-            {"label": "Log", "key": 13, "value": {}},
-        ],
-        "default_index": 0,
-        "category_color": (204, 170, 68), "category": "diaper",
-        "api_action": "baby_basics.log_diaper",
-        "base_params": {"type": "pee"},
-        "confirmation_label": "Pee", "confirmation_icon": "diaper_pee",
-        "resource_type": "diapers", "column": 1,
-    },
-    "poop": {
-        "title": "POOP",
-        "options": [
-            {"label": "Watery", "key": 11, "value": {"consistency": "watery"}},
-            {"label": "Loose", "key": 12, "value": {"consistency": "loose"}},
-            {"label": "Formed", "key": 13, "value": {"consistency": "formed"}},
-            {"label": "Hard", "key": 14, "value": {"consistency": "hard"}},
-        ],
-        "default_index": 2,
-        "category_color": (204, 170, 68), "category": "diaper",
-        "api_action": "baby_basics.log_diaper",
-        "base_params": {"type": "poop"},
-        "confirmation_label": "Poop", "confirmation_icon": "diaper_poop",
-        "resource_type": "diapers", "column": 1,
-    },
-    "both": {
-        "title": "PEE + POOP",
-        "options": [
-            {"label": "Watery", "key": 11, "value": {"consistency": "watery"}},
-            {"label": "Loose", "key": 12, "value": {"consistency": "loose"}},
-            {"label": "Formed", "key": 13, "value": {"consistency": "formed"}},
-            {"label": "Hard", "key": 14, "value": {"consistency": "hard"}},
-        ],
-        "default_index": 2,
-        "category_color": (204, 170, 68), "category": "diaper",
-        "api_action": "baby_basics.log_diaper",
-        "base_params": {"type": "both"},
-        "confirmation_label": "Pee +\nPoop", "confirmation_icon": "diaper_both",
-        "resource_type": "diapers", "column": 1,
-    },
-}
-
 _ICON_TO_DETAIL: dict[str, str] = {
     "breast_left": "breast_left", "breast_right": "breast_right",
     "bottle": "bottle", "diaper_pee": "pee", "diaper_poop": "poop", "diaper_both": "both",
-}
-_KEY_TO_COLUMN: dict[int, int] = {
-    11: 0, 6: 0, 1: 0, 12: 1, 7: 1, 2: 1, 13: 2, 8: 2, 3: 2,
-    14: 3, 9: 3, 4: 3, 15: 4, 10: 4, 5: 4,
 }
 
 
@@ -193,6 +104,23 @@ class MacropadController:
 
         # LED controller (set after device init)
         self._led = LedController(self._device)
+
+        # Sub-controllers — use lambda so queue replacement in tests propagates correctly
+        self._sleep_mgr = SleepManager(
+            api_client=self.api_client, sm=self._sm, led=self._led,
+            device=self._device, get_queue=lambda: self.queue, brightness=config.device.brightness,
+            refresh_display=self.refresh_display, refresh_dashboard=self._refresh_dashboard,
+        )
+        self._dispatcher = ActionDispatcher(
+            api_client=self.api_client, sm=self._sm, led=self._led,
+            device=self._device, get_queue=lambda: self.queue, renderer=self._renderer,
+            refresh_display=self.refresh_display, refresh_dashboard=self._refresh_dashboard,
+        )
+        self._undo_mgr = UndoManager(
+            api_client=self.api_client, sm=self._sm, led=self._led,
+            get_queue=lambda: self.queue, refresh_display=self.refresh_display,
+            refresh_dashboard=self._refresh_dashboard,
+        )
 
     def start(self) -> None:
         logger.info("Starting macropad controller")
@@ -387,14 +315,14 @@ class MacropadController:
             self._sm.enter_notes_submenu()
             self.refresh_display()
         elif button.action == "baby_basics.toggle_sleep":
-            self._handle_sleep_toggle()
+            self._sleep_mgr.handle_sleep_toggle()
         elif (detail_key := _ICON_TO_DETAIL.get(button.icon)):
             if detail_key in ("breast_left", "breast_right") and self._sm.state.skip_breast_detail:
-                self._execute_instant_action(button, key)
+                self._dispatcher.execute_instant_action(button, key)
             else:
-                self._enter_detail_screen(detail_key)
+                self._dispatcher.enter_detail_screen(detail_key)
         else:
-            self._execute_instant_action(button, key)
+            self._dispatcher.execute_instant_action(button, key)
 
     def _handle_detail_press(self, key: int) -> None:
         if key == 1:
@@ -408,12 +336,12 @@ class MacropadController:
             return
         for i, opt in enumerate(cfg["options"]):
             if key == opt["key"]:
-                self._commit_detail_option(cfg, opt)
+                self._dispatcher.commit_detail_option(cfg, opt)
                 return
 
     def _handle_confirmation_press(self, key: int, snap: Any) -> None:
         if key == 1 and snap.state.confirmation_resource_id:
-            self._execute_undo()
+            self._undo_mgr.execute_undo()
             return
         # Pressing any key during confirmation dismisses it early
         self._sm.return_home()
@@ -422,7 +350,7 @@ class MacropadController:
     def _handle_sleep_mode_press(self, key: int) -> None:
         self._device.set_brightness(self.config.device.brightness)
         if key == 13:
-            self._enter_wake_confirm(from_sleep=True)
+            self._sleep_mgr.enter_wake_confirm(from_sleep=True)
         else:
             self.refresh_display()
 
@@ -438,15 +366,8 @@ class MacropadController:
             return
         if key == 13:
             # Confirm → end sleep
-            self._handle_wake_up()
+            self._sleep_mgr.handle_wake_up()
             return
-
-    def _enter_wake_confirm(self, from_sleep: bool = False) -> None:
-        """Show wake confirmation screen before ending sleep."""
-        timer = self._sm.state.timer_seconds
-        expires = time.monotonic() + (timer if timer > 0 else 7)
-        self._sm.enter_wake_confirm(expires, from_sleep)
-        self.refresh_display()
 
     def _handle_notes_submenu_press(self, key: int) -> None:
         if key == 1:
@@ -458,7 +379,9 @@ class MacropadController:
             if i >= len(option_keys):
                 break
             if key == option_keys[i]:
-                self._execute_note_action(cat.content or cat.label, cat.label, getattr(cat, "api_category", "other"))
+                self._dispatcher.execute_note_action(
+                    cat.content or cat.label, cat.label, getattr(cat, "api_category", "other")
+                )
                 return
 
     def _handle_settings_press(self, key: int) -> None:
@@ -484,226 +407,25 @@ class MacropadController:
                 self.refresh_display()
                 return
 
-    # --- Action execution ---
-
-    def _enter_detail_screen(self, detail_key: str) -> None:
-        cfg = DETAIL_CONFIGS.get(detail_key)
-        if not cfg:
-            return
-        timer = self._sm.state.timer_seconds
-        expires = time.monotonic() + timer if timer > 0 else 0.0
-        self._sm.enter_detail(detail_key, cfg["options"], cfg["default_index"], dict(cfg["base_params"]), expires)
-        self.refresh_display()
-
-    def _commit_detail_option(self, cfg: dict, option: dict) -> None:
-        params = dict(cfg["base_params"])
-        params.update(option.get("value", {}))
-        self._call_api_and_confirm(
-            cfg["api_action"], params, cfg["confirmation_label"], cfg["confirmation_icon"],
-            cfg["category_color"], cfg["category"], cfg["column"], cfg["resource_type"],
-        )
-
-    def _commit_detail_default(self) -> None:
-        # Guard: if mode already changed (e.g., user pressed a key), bail out
-        if self._sm.mode != "detail":
-            return
-        cfg = DETAIL_CONFIGS.get(self._sm.get_detail_action() or "")
-        if not cfg:
-            self._sm.return_home()
-            self.refresh_display()
-            return
-        self._commit_detail_option(cfg, cfg["options"][cfg["default_index"]])
-
-    def _execute_instant_action(self, button: Any, key: int) -> None:
-        icon_name = button.icon
-        column = _KEY_TO_COLUMN.get(key, 0)
-        if icon_name == "diaper_pee":
-            cat, label, rtype = "diaper", "Pee", "diapers"
-        elif icon_name == "pump":
-            cat, label, rtype = "pump", "Pump", "notes"
-        else:
-            cat, label, rtype = "feeding", button.label, "feedings"
-        color = {"feeding": (102, 204, 102), "diaper": (204, 170, 68)}.get(cat, (200, 200, 200))
-        self._call_api_and_confirm(button.action, dict(button.params), label, icon_name, color, cat, column, rtype)
-
-    def _execute_note_action(self, content: str, label: str, category: str = "other") -> None:
-        self._call_api_and_confirm(
-            "baby_basics.log_note",
-            {"category": category, "title": label, "text": content},
-            label, "note", (153, 153, 153), "note", 2, "notes",
-        )
-
-    def _call_api_and_confirm(self, api_action: str, params: dict, label: str, icon: str,
-                              category_color: tuple[int, int, int], category: str, column: int, resource_type: str) -> None:
-        resource_id = None
-        context_line = ""
-        try:
-            result = self._dispatch_action(api_action, params)
-            if isinstance(result, dict):
-                for k in (resource_type[:-1], resource_type):
-                    if k in result and isinstance(result[k], dict):
-                        resource_id = result[k].get("id")
-                        break
-                if not resource_id:
-                    resource_id = result.get("id")
-            context_line = self._build_context_line(category)
-            self._led.flash_category(category)
-        except (
-            BabyBasicsAPIError, ConnectionError, httpx.TimeoutException, httpx.ConnectError
-        ) as e:
-            logger.warning("Action failed, queueing offline: %s", e)
-            self.queue.enqueue(api_action, params)
-            context_line = "Queued"
-            self._led.flash_queued()
-
-        if resource_id:
-            self._sm.push_recent_action({"resource_id": resource_id, "resource_type": resource_type,
-                                         "label": label, "timestamp": datetime.now(timezone.utc).isoformat()})
-        self._sm.enter_confirmation(api_action, label, context_line, icon, category_color, column,
-                                    time.monotonic() + CONFIRMATION_DURATION, resource_id, resource_type)
-        self._play_celebration(category_color, icon, label, context_line,
-                               self._sm.state.celebration_style)
-        self.refresh_display()
-        threading.Thread(target=self._refresh_dashboard, daemon=True).start()
-
-    def _play_celebration(self, category_color: tuple[int, int, int], icon: str,
-                          label: str, context: str, style: str) -> None:
-        """Play 4-frame compass rose expansion animation (~500ms total)."""
-        for frame_idx in range(4):
-            try:
-                screen = build_confirmation_screen(
-                    label, context, icon, category_color, style,
-                    celebration_frame=frame_idx,
-                )
-                jpeg = self._renderer.render(screen)
-                self._device.set_screen_image(jpeg)
-                time.sleep(0.12)
-            except Exception:
-                logger.exception("Celebration frame %d failed", frame_idx)
-                break
-
-    def _build_context_line(self, category: str) -> str:
-        dashboard = self._sm.state.dashboard
-        if not isinstance(dashboard, DashboardData):
-            return ""
-        counts = dashboard.today_counts
-        if category == "feeding":
-            side = dashboard.suggested_side
-            return f"Next: {side[0].upper()}" if side else f"{counts.get('feedings', 0)} feeds"
-        elif category == "diaper":
-            return f"{counts.get('diapers', 0)} diapers"
-        elif category == "pump":
-            return "Pumped"
-        return ""
-
-    # --- Sleep ---
+    # --- Thin delegators for backwards compatibility ---
 
     def _handle_sleep_toggle(self) -> None:
-        dashboard = self._sm.state.dashboard
-        active = isinstance(dashboard, DashboardData) and dashboard.active_sleep
-        if active:
-            sleep_id = dashboard.active_sleep.get("id")
-            if sleep_id:
-                # Store sleep state for wake confirmation flow
-                if not self._sm.state.sleep_active:
-                    self._sm.sync_sleep_active(
-                        True, sleep_id, dashboard.active_sleep.get("start_time")
-                    )
-                self._enter_wake_confirm()
-            return
-        try:
-            result = self.api_client.start_sleep()
-            data = result.get("sleep", result)
-            self._sm.enter_sleep_mode(data.get("id", ""), data.get("start_time", datetime.now(timezone.utc).isoformat()))
-            self._led.flash_sleep_start()
-        except (
-            BabyBasicsAPIError, ConnectionError, httpx.TimeoutException, httpx.ConnectError
-        ) as e:
-            logger.warning("Failed to start sleep: %s", e)
-            self.queue.enqueue("baby_basics.toggle_sleep", {})
-            self._sm.enter_sleep_mode("pending", datetime.now(timezone.utc).isoformat())
-            self._led.flash_queued()
-        self._device.set_brightness(10)
-        self.refresh_display()
+        self._sleep_mgr.handle_sleep_toggle()
+
+    def _enter_wake_confirm(self, from_sleep: bool = False) -> None:
+        self._sleep_mgr.enter_wake_confirm(from_sleep=from_sleep)
 
     def _handle_wake_up(self) -> None:
-        sleep_id = self._sm.get_sleep_id()
-        if not sleep_id:
-            self._sm.return_home()
-            self.refresh_display()
-            return
-        self._end_sleep(sleep_id)
+        self._sleep_mgr.handle_wake_up()
 
-    def _end_sleep(self, sleep_id: str) -> None:
-        self._device.set_brightness(self.config.device.brightness)
-        try:
-            self.api_client.end_sleep(sleep_id)
-            start_time = self._sm.get_sleep_start_time()
-            duration_str = self._calc_duration_str(start_time)
-            self._sm.exit_sleep_mode(ended_id=sleep_id)
-            self._led.flash_wake()
-            self._sm.enter_confirmation("baby_basics.end_sleep", "Awake!", duration_str,
-                                        "sunrise", (255, 220, 150), 2, time.monotonic() + CONFIRMATION_DURATION, None, "sleeps")
-        except (
-            BabyBasicsAPIError, ConnectionError, httpx.TimeoutException, httpx.ConnectError
-        ) as e:
-            logger.warning("Failed to end sleep: %s", e)
-            self._sm.exit_sleep_mode()
-            self._sm.return_home()
-            self._led.flash_error()
-        self.refresh_display()
-        threading.Thread(target=self._refresh_dashboard, daemon=True).start()
-
-    def _calc_duration_str(self, start_time: str | None) -> str:
-        if not start_time:
-            return "Sleep ended"
-        try:
-            start = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-            secs = (datetime.now(timezone.utc) - start).total_seconds()
-            h, m = int(secs // 3600), int((secs % 3600) // 60)
-            return f"Slept {h}h {m}m" if h > 0 else f"Slept {m}m"
-        except (ValueError, TypeError):
-            return "Sleep ended"
-
-    # --- Undo ---
-
-    def _execute_undo(self) -> None:
-        rid = self._sm.get_confirmation_resource_id()
-        rtype = self._sm.get_confirmation_resource_type()
-        if not rid or not rtype:
-            self._sm.return_home()
-            self.refresh_display()
-            return
-        try:
-            self._delete_resource(rtype, rid)
-            self._led.flash_undo()
-        except (
-            BabyBasicsAPIError, ConnectionError, httpx.TimeoutException, httpx.ConnectError
-        ) as e:
-            logger.warning("Undo failed, queueing: %s", e)
-            self.queue.enqueue(f"baby_basics.delete_{rtype}", {"resource_id": rid})
-            self._led.flash_queued()
-        self._sm.remove_recent_action(rid)
-        self._sm.return_home()
-        self.refresh_display()
-        threading.Thread(target=self._refresh_dashboard, daemon=True).start()
-
-    def _delete_resource(self, resource_type: str, resource_id: str) -> None:
-        self.api_client.delete_resource(resource_type, resource_id)
+    def _commit_detail_default(self) -> None:
+        self._dispatcher.commit_detail_default()
 
     def _dispatch_action(self, action: str, params: dict) -> Any:
-        if action == "baby_basics.log_feeding":
-            return self.api_client.log_feeding(**params)
-        elif action == "baby_basics.log_diaper":
-            return self.api_client.log_diaper(**params)
-        elif action == "baby_basics.toggle_sleep":
-            return self.api_client.toggle_sleep(dashboard=self._sm.state.dashboard)
-        elif action == "baby_basics.log_note":
-            return self.api_client.log_note(**params)
-        elif action.startswith("home_assistant."):
-            return None
-        else:
-            raise ValueError(f"Unknown action: {action}")
+        return self._dispatcher.dispatch_action(action, params)
+
+    def _execute_undo(self) -> None:
+        self._undo_mgr.execute_undo()
 
     # --- Dashboard ---
 
@@ -742,9 +464,9 @@ class MacropadController:
             if tick.action == "confirmation_expired":
                 self.refresh_display()
             elif tick.action == "detail_expired":
-                self._commit_detail_default()
+                self._dispatcher.commit_detail_default()
             elif tick.action == "wake_confirm_expired":
-                self._handle_wake_up()
+                self._sleep_mgr.handle_wake_up()
             elif tick.action == "refresh":
                 self.refresh_display()
             elif tick.mode == "home_grid":

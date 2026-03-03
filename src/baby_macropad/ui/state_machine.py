@@ -196,9 +196,12 @@ class StateMachine:
         with self._lock:
             self._state._home_dirty = True
 
-    def clear_home_dirty(self) -> None:
+    def clear_home_dirty(self) -> bool:
+        """Clear dirty flag and return whether it was set."""
         with self._lock:
+            was_dirty = self._state._home_dirty
             self._state._home_dirty = False
+            return was_dirty
 
     def set_connected(self, connected: bool) -> None:
         with self._lock:

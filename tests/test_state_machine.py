@@ -160,19 +160,19 @@ class TestTransitions:
 
 
 class TestHomeDirtyFlag:
-    def test_mark_and_clear_dirty(self):
+    def test_mark_home_dirty(self):
         sm = StateMachine(DisplayState())
-        assert sm.state._home_dirty is False
         sm.mark_home_dirty()
-        assert sm.state._home_dirty is True
-        sm.clear_home_dirty()
-        assert sm.state._home_dirty is False
+        assert sm.clear_home_dirty() is True
+
+    def test_clear_home_dirty_returns_false_when_clean(self):
+        sm = StateMachine(DisplayState())
+        assert sm.clear_home_dirty() is False
 
     def test_set_dashboard_sets_dirty(self):
         sm = StateMachine(DisplayState())
-        assert sm.state._home_dirty is False
         sm.set_dashboard(None, True, 0)
-        assert sm.state._home_dirty is True
+        assert sm.clear_home_dirty() is True
 
 
 class TestSyncSettings:

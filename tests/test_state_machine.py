@@ -97,6 +97,27 @@ class TestAdvanceTick:
         tick = sm.advance_tick(time.monotonic())
         assert tick.action == "none"
 
+    def test_home_grid_refresh_when_dirty(self):
+        sm = StateMachine(DisplayState())
+        sm.mark_home_dirty()
+        tick = sm.advance_tick(time.monotonic())
+        assert tick.action == "refresh"
+        assert tick.mode == "home_grid"
+
+    def test_home_grid_refresh_when_sleep_active(self):
+        sm = StateMachine(DisplayState())
+        sm.state.sleep_active = True
+        tick = sm.advance_tick(time.monotonic())
+        assert tick.action == "refresh"
+        assert tick.mode == "home_grid"
+
+    def test_home_grid_no_refresh_after_dirty_cleared(self):
+        sm = StateMachine(DisplayState())
+        sm.mark_home_dirty()
+        sm.clear_home_dirty()
+        tick = sm.advance_tick(time.monotonic())
+        assert tick.action == "none"
+
 
 class TestTransitions:
     def test_enter_detail(self):
@@ -136,6 +157,22 @@ class TestTransitions:
         assert len(sm.state.recent_actions) == 1
         sm.remove_recent_action("r1")
         assert len(sm.state.recent_actions) == 0
+
+
+class TestHomeDirtyFlag:
+    def test_mark_and_clear_dirty(self):
+        sm = StateMachine(DisplayState())
+        assert sm.state._home_dirty is False
+        sm.mark_home_dirty()
+        assert sm.state._home_dirty is True
+        sm.clear_home_dirty()
+        assert sm.state._home_dirty is False
+
+    def test_set_dashboard_sets_dirty(self):
+        sm = StateMachine(DisplayState())
+        assert sm.state._home_dirty is False
+        sm.set_dashboard(None, True, 0)
+        assert sm.state._home_dirty is True
 
 
 class TestSyncSettings:

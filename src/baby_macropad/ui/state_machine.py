@@ -103,6 +103,11 @@ class StateMachine:
             if s.mode == "sleep_mode":
                 return TickAction(action="refresh", mode="sleep_mode")
 
+            # Home grid: refresh for live sleep timer or dirty flag
+            if s.mode == "home_grid":
+                if s.sleep_active or s._home_dirty:
+                    return TickAction(action="refresh", mode="home_grid")
+
             return TickAction(action="none", mode=s.mode)
 
     # --- Transition methods ---
@@ -185,6 +190,15 @@ class StateMachine:
             self._state.dashboard = dashboard
             self._state.connected = connected
             self._state.queued_count = queued_count
+            self._state._home_dirty = True
+
+    def mark_home_dirty(self) -> None:
+        with self._lock:
+            self._state._home_dirty = True
+
+    def clear_home_dirty(self) -> None:
+        with self._lock:
+            self._state._home_dirty = False
 
     def set_connected(self, connected: bool) -> None:
         with self._lock:

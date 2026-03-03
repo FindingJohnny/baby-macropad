@@ -457,6 +457,7 @@ class MacropadController:
         try:
             dashboard = self.api_client.get_dashboard()
             self._sm.set_dashboard(dashboard, True, self.queue.count())
+            self._sm.mark_home_dirty()
             if dashboard.active_sleep and not self._sm.state.sleep_active and self._sm.mode == "home_grid":
                 sleep_id = dashboard.active_sleep.get("id")
                 # Don't re-activate a sleep we just ended (API may lag behind)
@@ -491,6 +492,10 @@ class MacropadController:
                 self._dispatcher.commit_detail_default()
             elif tick.action == "wake_confirm_expired":
                 self._sleep_mgr.handle_wake_up()
+            elif tick.action == "refresh" and tick.mode == "home_grid":
+                self._sm.clear_home_dirty()
+                self.refresh_display()
+                self._check_brightness_schedule()
             elif tick.action == "refresh":
                 self.refresh_display()
             elif tick.mode == "home_grid":

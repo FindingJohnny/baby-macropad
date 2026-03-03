@@ -1,16 +1,18 @@
 """Tests for the MacropadController using stub device and mocked API."""
 
 import textwrap
+from datetime import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import respx
 from httpx import Response
 
+from baby_macropad.actions.baby_basics import DashboardData
 from baby_macropad.config import load_config
 from baby_macropad.device import StubDevice
-from baby_macropad.main import MacropadController
+from baby_macropad.main import MacropadController, _in_time_range
 
 API_URL = "https://example.com/api/v1"
 CHILD_ID = "child-uuid-123"
@@ -206,3 +208,62 @@ def test_controller_stop(controller: MacropadController):
     """Stop should clean up without errors."""
     controller.stop()
     assert controller._shutdown.is_set()
+
+
+# --- _in_time_range tests ---
+
+def test_in_time_range_non_wrapping():
+    """Time inside a non-wrapping range returns True."""
+    assert _in_time_range(time(12, 0), time(10, 0), time(18, 0)) is True
+
+
+def test_in_time_range_non_wrapping_outside():
+    """Time before a non-wrapping range returns False."""
+    assert _in_time_range(time(8, 0), time(10, 0), time(18, 0)) is False
+
+
+def test_in_time_range_midnight_crossing():
+    """Time after start in an overnight range (start > end) returns True."""
+    assert _in_time_range(time(22, 0), time(20, 0), time(6, 0)) is True
+
+
+def test_in_time_range_midnight_crossing_inside_morning():
+    """Time before end in an overnight range (start > end) returns True."""
+    assert _in_time_range(time(3, 0), time(20, 0), time(6, 0)) is True
+
+
+def test_in_time_range_midnight_crossing_outside():
+    """Time between end and start in an overnight range returns False."""
+    assert _in_time_range(time(12, 0), time(20, 0), time(6, 0)) is False
+
+
+def test_in_time_range_boundary():
+    """Start is inclusive; end is exclusive."""
+    assert _in_time_range(time(10, 0), time(10, 0), time(18, 0)) is True
+    assert _in_time_range(time(18, 0), time(10, 0), time(18, 0)) is False
+
+
+# --- Sleep flow tests ---
+
+@respx.mock
+def test_sleep_toggle_starts_sleep(controller: MacropadController):
+    """_handle_sleep_toggle() with no active sleep starts one and enters sleep_mode."""
+    respx.post(f"{BASE}/sleeps").mock(
+        return_value=Response(
+            201, json={"sleep": {"id": "s1", "start_time": "2026-01-01T00:00:00Z"}}
+        )
+    )
+    respx.get(f"{BASE}/dashboard").mock(
+        return_value=Response(200, json={"dashboard": {}})
+    )
+    controller._handle_sleep_toggle()
+    assert controller._sm.mode == "sleep_mode"
+
+
+def test_sleep_toggle_active_enters_wake_confirm(controller: MacropadController):
+    """_handle_sleep_toggle() with active_sleep in dashboard enters wake_confirm."""
+    active_sleep = {"id": "s1", "start_time": "2026-01-01T00:00:00Z"}
+    dashboard = DashboardData(active_sleep=active_sleep)
+    controller._sm.set_dashboard(dashboard, True, 0)
+    controller._handle_sleep_toggle()
+    assert controller._sm.mode == "wake_confirm"

@@ -170,3 +170,12 @@ def test_check_connection_failure(client: BabyBasicsClient):
         return_value=Response(500, json={"error": {"code": "INTERNAL", "message": "fail", "details": []}})
     )
     assert client.check_connection() is False
+
+
+@respx.mock
+def test_delete_resource(client: BabyBasicsClient):
+    respx.delete(f"{BASE}/feedings/f1").mock(
+        return_value=Response(204)
+    )
+    result = client.delete_resource("feedings", "f1")
+    assert result == {}

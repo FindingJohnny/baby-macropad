@@ -289,6 +289,30 @@ def test_settings_synced_on_startup(controller: MacropadController):
     assert state.skip_breast_detail is False
 
 
+def test_dashboard_refresh_marks_home_dirty(controller: MacropadController):
+    """After _refresh_dashboard, home_dirty should be True."""
+    import respx as rx
+    with rx.mock:
+        rx.get(f"{BASE}/dashboard").mock(
+            return_value=Response(200, json={"dashboard": {}})
+        )
+        controller._refresh_dashboard()
+    assert controller._sm.state._home_dirty is True
+
+
+def test_tick_clears_dirty_on_home_refresh(controller: MacropadController):
+    """Tick loop handler clears dirty flag when refreshing home grid."""
+    controller._sm.mark_home_dirty()
+    assert controller._sm.state._home_dirty is True
+    # Simulate what _display_tick_loop does for home_grid refresh
+    import time as t
+    tick = controller._sm.advance_tick(t.monotonic())
+    assert tick.action == "refresh"
+    assert tick.mode == "home_grid"
+    controller._sm.clear_home_dirty()
+    assert controller._sm.state._home_dirty is False
+
+
 def test_sleep_toggle_active_enters_wake_confirm(controller: MacropadController):
     """_handle_sleep_toggle() with active_sleep in dashboard enters wake_confirm."""
     active_sleep = {"id": "s1", "start_time": "2026-01-01T00:00:00Z"}

@@ -70,6 +70,9 @@ class DisplayState:
     # Recent actions for undo in settings (last 5)
     recent_actions: list[dict] = field(default_factory=list)
 
+    # Dirty flag: signals home grid needs re-render
+    _home_dirty: bool = False
+
     def enter_detail(
         self,
         action: str,

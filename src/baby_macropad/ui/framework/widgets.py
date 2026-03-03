@@ -141,7 +141,11 @@ class IconLabel:
         icon_label_gap = 3
         content_height = self.icon_size + icon_label_gap + label_height
 
-        top_offset = (rect.h - content_height) // 2
+        # Bias content toward the top of the cell (not centered) so badges
+        # and subtitles stay visible above the bottom bezel edge.
+        # Use 1/3 of the remaining space above, 2/3 below.
+        remaining = rect.h - content_height
+        top_offset = max(2, remaining // 3)
 
         # Try to load icon
         asset = ICON_ASSETS.get(self.icon_name, self.icon_name)

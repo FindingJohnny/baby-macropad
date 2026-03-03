@@ -100,15 +100,34 @@ class SleepManager:
                 "sunrise", (255, 220, 150), 2,
                 time.monotonic() + CONFIRMATION_DURATION, None, "sleeps",
             )
-        except (
-            BabyBasicsAPIError, ConnectionError, httpx.TimeoutException, httpx.ConnectError
-        ) as e:
+        except BabyBasicsAPIError as e:
+            if e.status_code == 400:
+                # Sleep already ended or invalid — clear stale state and move on
+                logger.warning("Stale sleep %s (400), clearing local state", sleep_id[:8])
+                self._sm.exit_sleep_mode(ended_id=sleep_id)
+                self._clear_stale_active_sleep()
+                self._sm.return_home()
+            else:
+                logger.warning("Failed to end sleep: %s", e)
+                self._sm.exit_sleep_mode()
+                self._sm.return_home()
+                self._led.flash_error()
+        except (ConnectionError, httpx.TimeoutException, httpx.ConnectError) as e:
             logger.warning("Failed to end sleep: %s", e)
             self._sm.exit_sleep_mode()
             self._sm.return_home()
             self._led.flash_error()
         self._refresh_display()
         threading.Thread(target=self._refresh_dashboard, daemon=True).start()
+
+    def _clear_stale_active_sleep(self) -> None:
+        """Clear active_sleep from local dashboard when the API says it's invalid."""
+        from baby_macropad.actions.baby_basics import DashboardData
+        dashboard = self._sm.state.dashboard
+        if isinstance(dashboard, DashboardData):
+            dashboard.active_sleep = None
+        self._sm.state.sleep_active = False
+        self._sm.state.sleep_id = None
 
     def _calc_duration_str(self, start_time: str | None) -> str:
         if not start_time:

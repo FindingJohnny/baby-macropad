@@ -280,6 +280,10 @@ class StateMachine:
                         "right" if started_side == "left" else "left"
                     )
             elif action == "log_diaper":
-                counts["diapers"] = counts.get("diapers", 0) + 1
+                diaper_type = params.get("type", "pee")
+                if diaper_type in ("pee", "both"):
+                    counts["diapers_pee"] = counts.get("diapers_pee", 0) + 1
+                if diaper_type in ("poop", "both"):
+                    counts["diapers_poop"] = counts.get("diapers_poop", 0) + 1
 
             self._state._home_dirty = True

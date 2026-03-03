@@ -196,12 +196,12 @@ class TestSyncSettings:
 
 
 class TestApplyOptimisticUpdate:
-    def _make_sm_with_dashboard(self, suggested_side="left", feedings=3, diapers=5):
+    def _make_sm_with_dashboard(self, suggested_side="left", feedings=3, diapers_pee=3, diapers_poop=2):
         from baby_macropad.actions.baby_basics import DashboardData
 
         dashboard = DashboardData(
             suggested_side=suggested_side,
-            today_counts={"feedings": feedings, "diapers": diapers},
+            today_counts={"feedings": feedings, "diapers_pee": diapers_pee, "diapers_poop": diapers_poop},
         )
         sm = StateMachine(DisplayState())
         sm.set_dashboard(dashboard, True, 0)
@@ -228,10 +228,21 @@ class TestApplyOptimisticUpdate:
         sm.apply_optimistic_update("log_feeding", {"type": "bottle"})
         assert sm.state.dashboard.suggested_side == "left"
 
-    def test_diaper_increments_count(self):
-        sm = self._make_sm_with_dashboard(diapers=5)
+    def test_pee_diaper_increments_pee_count(self):
+        sm = self._make_sm_with_dashboard(diapers_pee=3)
         sm.apply_optimistic_update("log_diaper", {"type": "pee"})
-        assert sm.state.dashboard.today_counts["diapers"] == 6
+        assert sm.state.dashboard.today_counts["diapers_pee"] == 4
+
+    def test_poop_diaper_increments_poop_count(self):
+        sm = self._make_sm_with_dashboard(diapers_poop=2)
+        sm.apply_optimistic_update("log_diaper", {"type": "poop"})
+        assert sm.state.dashboard.today_counts["diapers_poop"] == 3
+
+    def test_both_diaper_increments_both_counts(self):
+        sm = self._make_sm_with_dashboard(diapers_pee=3, diapers_poop=2)
+        sm.apply_optimistic_update("log_diaper", {"type": "both"})
+        assert sm.state.dashboard.today_counts["diapers_pee"] == 4
+        assert sm.state.dashboard.today_counts["diapers_poop"] == 3
 
     def test_sets_home_dirty(self):
         sm = self._make_sm_with_dashboard()
@@ -245,10 +256,11 @@ class TestApplyOptimisticUpdate:
         assert sm.state.dashboard is None
 
     def test_unknown_action_is_noop(self):
-        sm = self._make_sm_with_dashboard(feedings=3, diapers=5)
+        sm = self._make_sm_with_dashboard(feedings=3, diapers_pee=3, diapers_poop=2)
         sm.apply_optimistic_update("log_note", {"content": "test"})
         assert sm.state.dashboard.today_counts["feedings"] == 3
-        assert sm.state.dashboard.today_counts["diapers"] == 5
+        assert sm.state.dashboard.today_counts["diapers_pee"] == 3
+        assert sm.state.dashboard.today_counts["diapers_poop"] == 2
 
 
 class TestConcurrentThreadSafety:

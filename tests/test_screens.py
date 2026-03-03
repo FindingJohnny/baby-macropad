@@ -130,50 +130,69 @@ class TestConfirmationScreen:
         screen = build_confirmation_screen(
             action_label="Left breast logged",
             context_line="Next: Right breast",
-            icon_name="bottle",
             category_color=(102, 204, 102),
         )
         data = renderer.render(screen)
         _validate_jpeg(data)
 
-    def test_column_fill_visible(self):
-        """Column fill celebration should produce non-background pixels in the column."""
+    def test_color_header_visible(self):
+        """Top row should be filled with category color."""
         screen = build_confirmation_screen(
             action_label="Logged",
             context_line="",
-            icon_name="moon",
             category_color=(102, 153, 204),
-            celebration_style="color_fill",
-            column_index=2,
         )
         data = renderer.render(screen)
         img = _validate_jpeg(data)
-        # Sample a pixel in column 2, row 0 area — should not be pure background
+        # Sample a pixel in top row center (key 13 area)
         # VIS_COL_X[2]=203, VIS_ROW_Y[0]=10
         px = img.getpixel((220, 30))
         bg = (28, 28, 30)
-        assert px != bg, f"Expected non-background pixel at column 2, got {px}"
+        assert px != bg, f"Expected non-background pixel in top row, got {px}"
 
-    def test_no_celebration(self):
-        screen = build_confirmation_screen(
-            action_label="Pee logged",
-            context_line="",
-            icon_name="diaper",
-            category_color=(204, 170, 68),
-            celebration_style="none",
-        )
-        data = renderer.render(screen)
-        _validate_jpeg(data)
-
-    def test_undo_at_key_1(self):
+    def test_done_at_key_5(self):
         screen = build_confirmation_screen(
             action_label="Test",
             context_line="",
-            icon_name="moon",
             category_color=(102, 153, 204),
+        )
+        assert 5 in screen.cells
+        assert screen.cells[5].on_press == "done"
+
+    def test_undo_shown_with_resource_id(self):
+        screen = build_confirmation_screen(
+            action_label="Test",
+            context_line="",
+            category_color=(102, 153, 204),
+            resource_id="abc-123",
         )
         assert 1 in screen.cells
         assert screen.cells[1].on_press == "undo"
+
+    def test_undo_hidden_without_resource_id(self):
+        screen = build_confirmation_screen(
+            action_label="Test",
+            context_line="",
+            category_color=(102, 153, 204),
+        )
+        assert 1 not in screen.cells
+
+    def test_checkmark_at_key_13(self):
+        screen = build_confirmation_screen(
+            action_label="Test",
+            context_line="",
+            category_color=(102, 204, 102),
+        )
+        assert 13 in screen.cells
+
+    def test_top_row_all_colored(self):
+        screen = build_confirmation_screen(
+            action_label="Test",
+            context_line="",
+            category_color=(102, 204, 102),
+        )
+        for key in (11, 12, 13, 14, 15):
+            assert key in screen.cells
 
 
 class TestSelectionScreen:

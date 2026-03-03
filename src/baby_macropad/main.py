@@ -203,8 +203,8 @@ class MacropadController:
             elif s.mode == "confirmation" and now < s.confirmation_expires:
                 screen = build_confirmation_screen(
                     s.confirmation_label, s.confirmation_context,
-                    s.confirmation_icon, s.confirmation_category_color,
-                    s.celebration_style,
+                    s.confirmation_category_color,
+                    resource_id=s.confirmation_resource_id,
                 )
             elif s.mode == "detail" and (
                 s.detail_timer_expires == 0.0 or now < s.detail_timer_expires
@@ -367,9 +367,11 @@ class MacropadController:
         if key == 1 and snap.state.confirmation_resource_id:
             self._undo_mgr.execute_undo()
             return
-        # Pressing any key during confirmation dismisses it early
-        self._sm.return_home()
-        self.refresh_display()
+        if key == 5:
+            self._sm.return_home()
+            self.refresh_display()
+            return
+        # All other keys ignored during confirmation
 
     def _handle_sleep_mode_press(self, key: int) -> None:
         self._device.set_brightness(self.config.device.brightness)

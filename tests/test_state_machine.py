@@ -185,7 +185,7 @@ class TestSyncSettings:
 
     def test_sync_settings_overrides_initial(self):
         state = DisplayState(
-            timer_seconds=5, celebration_style="color_fill",
+            timer_seconds=5, celebration_style="flash",
             skip_breast_detail=False,
         )
         sm = StateMachine(state)

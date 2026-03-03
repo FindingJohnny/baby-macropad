@@ -22,9 +22,9 @@ def _format_value(field_name: str, value, extra: dict) -> str:
         return "ON" if value else "OFF"
     # Map known string values to short labels
     style_map = {
-        "color_fill": "Fill",
-        "radiate": "Glow",
-        "randomize": "Fun",
+        "flash": "Flash",
+        "pulse": "Pulse",
+        "ripple": "Ripple",
         "none": "Off",
     }
     if isinstance(value, str) and value in style_map:

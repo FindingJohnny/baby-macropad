@@ -225,29 +225,85 @@ class ActionDispatcher:
             api_action, label, context_line, icon, category_color, column,
             time.monotonic() + CONFIRMATION_DURATION, resource_id, resource_type,
         )
-        self._play_celebration(category_color, icon, label, context_line,
-                               self._sm.state.celebration_style)
+        self._play_celebration(category_color, self._sm.state.celebration_style)
         self._refresh_display()
         threading.Thread(target=self._refresh_dashboard, daemon=True).start()
 
-    def _play_celebration(self, category_color: tuple[int, int, int], icon: str,
-                          label: str, context: str, style: str) -> None:
-        """Play 4-frame compass rose expansion animation (~500ms total)."""
+    def _play_celebration(self, category_color: tuple[int, int, int],
+                          style: str) -> None:
+        """Play celebration animation before showing confirmation screen."""
         if style == "none":
             return
-        from baby_macropad.ui.screens.confirmation import build_confirmation_screen
-        for frame_idx in range(4):
+        frames = self._build_celebration_frames(category_color, style)
+        for i, frame_jpeg in enumerate(frames):
             try:
-                screen = build_confirmation_screen(
-                    label, context, icon, category_color, style,
-                    celebration_frame=frame_idx,
-                )
-                jpeg = self._renderer.render(screen)
-                self._device.set_screen_image(jpeg)
-                time.sleep(0.12)
+                self._device.set_screen_image(frame_jpeg)
+                time.sleep(0.08)
             except Exception:
-                logger.exception("Celebration frame %d failed", frame_idx)
+                logger.exception("Celebration frame %d failed", i)
                 break
+
+    def _build_celebration_frames(
+        self, category_color: tuple[int, int, int], style: str,
+    ) -> list[bytes]:
+        """Pre-render celebration frames as JPEG bytes.
+
+        - flash: 1 frame — full screen category color + checkmark
+        - pulse: 2 frames — full color, then top row only
+        - ripple: 3 frames — center col, center+adjacent, all cols (top row)
+        """
+        from baby_macropad.ui.framework.screen import CellDef, ScreenDef
+        from baby_macropad.ui.framework.widgets import Card, Icon, Spacer
+
+        def _color_cells(keys: set[int]) -> dict[int, CellDef]:
+            cells: dict[int, CellDef] = {}
+            for key in keys:
+                cells[key] = CellDef(
+                    widget=Card(fill=category_color, child=Spacer()),
+                    key_num=key,
+                )
+            return cells
+
+        top_row = {11, 12, 13, 14, 15}
+        all_keys = set(range(1, 16))
+
+        if style == "flash":
+            cells = _color_cells(all_keys)
+            cells[8] = CellDef(
+                widget=Card(
+                    fill=category_color,
+                    child=Icon(asset_name="check", color=(255, 255, 255), size=36),
+                ),
+                key_num=8,
+            )
+            return [self._renderer.render(ScreenDef(name="celebration", cells=cells))]
+
+        elif style == "pulse":
+            cells1 = _color_cells(all_keys)
+            cells1[8] = CellDef(
+                widget=Card(
+                    fill=category_color,
+                    child=Icon(asset_name="check", color=(255, 255, 255), size=36),
+                ),
+                key_num=8,
+            )
+            cells2 = _color_cells(top_row)
+            return [
+                self._renderer.render(ScreenDef(name="celebration", cells=cells1)),
+                self._renderer.render(ScreenDef(name="celebration", cells=cells2)),
+            ]
+
+        elif style == "ripple":
+            cells1 = _color_cells({13})
+            cells2 = _color_cells({12, 13, 14})
+            cells3 = _color_cells(top_row)
+            return [
+                self._renderer.render(ScreenDef(name="celebration", cells=cells1)),
+                self._renderer.render(ScreenDef(name="celebration", cells=cells2)),
+                self._renderer.render(ScreenDef(name="celebration", cells=cells3)),
+            ]
+
+        return []
 
     def _build_context_line(self, category: str) -> str:
         dashboard = self._sm.state.dashboard

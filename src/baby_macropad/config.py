@@ -132,7 +132,7 @@ class AnimationsConfig(BaseModel):
 class SettingsMenuConfig(BaseModel):
     timer_duration_seconds: int = Field(default=7, ge=0, le=30)
     skip_breast_detail: bool = False
-    celebration_style: str = "color_fill"
+    celebration_style: str = "flash"
     lock_enabled: bool = False
     lock_pin: str = ""
 

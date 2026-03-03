@@ -273,20 +273,82 @@ def test_celebration_none_skips_rendering(controller: MacropadController):
     device.set_screen_image = MagicMock()
     controller._dispatcher._play_celebration(
         category_color=(102, 204, 102),
-        icon="breast_left",
-        label="Fed L",
-        context="",
         style="none",
     )
     device.set_screen_image.assert_not_called()
+
+
+def test_celebration_flash_renders_one_frame(controller: MacropadController):
+    """_play_celebration with style='flash' should push exactly 1 frame."""
+    controller._dispatcher._device.set_screen_image = MagicMock()
+    controller._dispatcher._play_celebration(
+        category_color=(102, 204, 102),
+        style="flash",
+    )
+    assert controller._dispatcher._device.set_screen_image.call_count == 1
+
+
+def test_celebration_pulse_renders_two_frames(controller: MacropadController):
+    """_play_celebration with style='pulse' should push exactly 2 frames."""
+    controller._dispatcher._device.set_screen_image = MagicMock()
+    controller._dispatcher._play_celebration(
+        category_color=(204, 170, 68),
+        style="pulse",
+    )
+    assert controller._dispatcher._device.set_screen_image.call_count == 2
+
+
+def test_celebration_ripple_renders_three_frames(controller: MacropadController):
+    """_play_celebration with style='ripple' should push exactly 3 frames."""
+    controller._dispatcher._device.set_screen_image = MagicMock()
+    controller._dispatcher._play_celebration(
+        category_color=(102, 153, 204),
+        style="ripple",
+    )
+    assert controller._dispatcher._device.set_screen_image.call_count == 3
 
 
 def test_settings_synced_on_startup(controller: MacropadController):
     """After construction, state machine should have SettingsModel defaults."""
     state = controller._sm.state
     assert state.timer_seconds == 7
-    assert state.celebration_style == "color_fill"
+    assert state.celebration_style == "flash"
     assert state.skip_breast_detail is False
+
+
+@respx.mock
+def test_done_key_returns_home(controller: MacropadController):
+    """Key 5 (DONE) during confirmation should return to home grid."""
+    respx.post(f"{BASE}/diapers").mock(
+        return_value=Response(201, json={"diaper": {"id": "d1"}})
+    )
+    respx.get(f"{BASE}/dashboard").mock(
+        return_value=Response(200, json={"dashboard": {}})
+    )
+    # Enter detail and commit to get to confirmation
+    controller._on_key_press(2, True)  # physical 2 → logical 12 (PEE)
+    controller._commit_detail_default()
+    assert controller._sm.mode == "confirmation"
+    # Press DONE (physical 15 → logical 5)
+    controller._on_key_press(15, True)
+    assert controller._sm.mode == "home_grid"
+
+
+@respx.mock
+def test_other_keys_ignored_during_confirmation(controller: MacropadController):
+    """Keys other than 1 and 5 should be ignored during confirmation."""
+    respx.post(f"{BASE}/diapers").mock(
+        return_value=Response(201, json={"diaper": {"id": "d1"}})
+    )
+    respx.get(f"{BASE}/dashboard").mock(
+        return_value=Response(200, json={"dashboard": {}})
+    )
+    controller._on_key_press(2, True)  # physical 2 → logical 12 (PEE)
+    controller._commit_detail_default()
+    assert controller._sm.mode == "confirmation"
+    # Press key 3 (physical 13 → logical 3) — should stay in confirmation
+    controller._on_key_press(13, True)
+    assert controller._sm.mode == "confirmation"
 
 
 def test_dashboard_refresh_marks_home_dirty(controller: MacropadController):

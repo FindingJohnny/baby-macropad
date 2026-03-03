@@ -65,7 +65,7 @@ class DisplayState:
     # Runtime settings (can be changed via settings menu, persisted separately)
     timer_seconds: int = 7
     skip_breast_detail: bool = False
-    celebration_style: str = "color_fill"
+    celebration_style: str = "flash"
 
     # Recent actions for undo in settings (last 5)
     recent_actions: list[dict] = field(default_factory=list)

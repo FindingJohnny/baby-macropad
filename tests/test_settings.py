@@ -11,7 +11,7 @@ class TestSettingsDefaults:
         s = SettingsModel()
         assert s.timer_duration_seconds == 7
         assert s.skip_breast_detail is False
-        assert s.celebration_style == "color_fill"
+        assert s.celebration_style == "flash"
         assert s.brightness == 80
         assert s.tutorial_completed is False
 
@@ -54,11 +54,15 @@ class TestCycleField:
             patch("baby_macropad.settings._SETTINGS_FILE", tmp_path / "s.yaml"),
             patch("baby_macropad.settings._SETTINGS_DIR", tmp_path),
         ):
-            s = SettingsModel(celebration_style="color_fill")
+            s = SettingsModel(celebration_style="flash")
+            s.cycle_field("celebration_style")
+            assert s.celebration_style == "pulse"
+            s.cycle_field("celebration_style")
+            assert s.celebration_style == "ripple"
             s.cycle_field("celebration_style")
             assert s.celebration_style == "none"
             s.cycle_field("celebration_style")
-            assert s.celebration_style == "color_fill"
+            assert s.celebration_style == "flash"
 
     def test_cycle_brightness(self, tmp_path: Path):
         with (

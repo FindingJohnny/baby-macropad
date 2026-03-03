@@ -29,10 +29,10 @@ class SettingsModel(BaseModel):
         json_schema_extra={"display_label": "Quick Log"},
     )
     celebration_style: str = Field(
-        default="color_fill",
+        default="flash",
         json_schema_extra={
             "display_label": "Celebrate",
-            "cycle_values": ["color_fill", "none"],
+            "cycle_values": ["flash", "pulse", "ripple", "none"],
         },
     )
     brightness: int = Field(

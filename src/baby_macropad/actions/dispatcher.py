@@ -204,8 +204,7 @@ class ActionDispatcher:
                         break
                 if not resource_id:
                     resource_id = result.get("id")
-            action_name = api_action.removeprefix("baby_basics.")
-            self._sm.apply_optimistic_update(action_name, params)
+            self._sm.apply_optimistic_update(api_action, params)
             context_line = self._build_context_line(category)
             self._led.flash_category(category)
         except (

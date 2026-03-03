@@ -272,14 +272,15 @@ class StateMachine:
 
             counts = dashboard.today_counts
 
-            if action == "log_feeding":
+            if action == "baby_basics.log_feeding":
+                if params.get("type") == "breast":
+                    started = params.get("started_side")
+                    if started:
+                        dashboard.suggested_side = (
+                            "right" if started == "left" else "left"
+                        )
                 counts["feedings"] = counts.get("feedings", 0) + 1
-                started_side = params.get("started_side")
-                if started_side in ("left", "right"):
-                    dashboard.suggested_side = (
-                        "right" if started_side == "left" else "left"
-                    )
-            elif action == "log_diaper":
+            elif action == "baby_basics.log_diaper":
                 counts["diapers"] = counts.get("diapers", 0) + 1
 
             self._state._home_dirty = True

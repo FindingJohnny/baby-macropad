@@ -195,6 +195,62 @@ class TestSyncSettings:
         assert sm.state.skip_breast_detail is True
 
 
+class TestApplyOptimisticUpdate:
+    def _make_sm_with_dashboard(self, suggested_side="left", feedings=3, diapers=5):
+        from baby_macropad.actions.baby_basics import DashboardData
+
+        dashboard = DashboardData(
+            suggested_side=suggested_side,
+            today_counts={"feedings": feedings, "diapers": diapers},
+        )
+        sm = StateMachine(DisplayState())
+        sm.set_dashboard(dashboard, True, 0)
+        sm.clear_home_dirty()  # reset from set_dashboard
+        return sm
+
+    def test_feeding_increments_count(self):
+        sm = self._make_sm_with_dashboard(feedings=3)
+        sm.apply_optimistic_update("log_feeding", {"type": "breast", "started_side": "left"})
+        assert sm.state.dashboard.today_counts["feedings"] == 4
+
+    def test_breast_feeding_flips_suggested_side_left_to_right(self):
+        sm = self._make_sm_with_dashboard(suggested_side="left")
+        sm.apply_optimistic_update("log_feeding", {"type": "breast", "started_side": "left"})
+        assert sm.state.dashboard.suggested_side == "right"
+
+    def test_breast_feeding_flips_suggested_side_right_to_left(self):
+        sm = self._make_sm_with_dashboard(suggested_side="right")
+        sm.apply_optimistic_update("log_feeding", {"type": "breast", "started_side": "right"})
+        assert sm.state.dashboard.suggested_side == "left"
+
+    def test_bottle_feeding_does_not_flip_side(self):
+        sm = self._make_sm_with_dashboard(suggested_side="left")
+        sm.apply_optimistic_update("log_feeding", {"type": "bottle"})
+        assert sm.state.dashboard.suggested_side == "left"
+
+    def test_diaper_increments_count(self):
+        sm = self._make_sm_with_dashboard(diapers=5)
+        sm.apply_optimistic_update("log_diaper", {"type": "pee"})
+        assert sm.state.dashboard.today_counts["diapers"] == 6
+
+    def test_sets_home_dirty(self):
+        sm = self._make_sm_with_dashboard()
+        sm.apply_optimistic_update("log_diaper", {"type": "pee"})
+        assert sm.clear_home_dirty() is True
+
+    def test_no_dashboard_is_noop(self):
+        sm = StateMachine(DisplayState())
+        # Should not raise even without dashboard
+        sm.apply_optimistic_update("log_feeding", {"type": "breast", "started_side": "left"})
+        assert sm.state.dashboard is None
+
+    def test_unknown_action_is_noop(self):
+        sm = self._make_sm_with_dashboard(feedings=3, diapers=5)
+        sm.apply_optimistic_update("log_note", {"content": "test"})
+        assert sm.state.dashboard.today_counts["feedings"] == 3
+        assert sm.state.dashboard.today_counts["diapers"] == 5
+
+
 class TestConcurrentThreadSafety:
     def test_atomic_snapshot_consistency(self):
         """Concurrent key handler and tick thread should never see inconsistent state.

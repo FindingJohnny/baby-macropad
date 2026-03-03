@@ -255,3 +255,31 @@ class StateMachine:
     def clear_ended_sleep(self) -> None:
         with self._lock:
             self._state.ended_sleep_id = None
+
+    def apply_optimistic_update(self, action: str, params: dict) -> None:
+        """Optimistically update local dashboard state after a successful API call.
+
+        Increments today_counts and flips suggested_side so the home grid
+        reflects the change immediately, without waiting for the next
+        dashboard poll.
+        """
+        with self._lock:
+            from baby_macropad.actions.baby_basics import DashboardData
+
+            dashboard = self._state.dashboard
+            if not isinstance(dashboard, DashboardData):
+                return
+
+            counts = dashboard.today_counts
+
+            if action == "log_feeding":
+                counts["feedings"] = counts.get("feedings", 0) + 1
+                started_side = params.get("started_side")
+                if started_side in ("left", "right"):
+                    dashboard.suggested_side = (
+                        "right" if started_side == "left" else "left"
+                    )
+            elif action == "log_diaper":
+                counts["diapers"] = counts.get("diapers", 0) + 1
+
+            self._state._home_dirty = True

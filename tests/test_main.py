@@ -319,3 +319,47 @@ def test_sleep_toggle_active_enters_wake_confirm(controller: MacropadController)
     controller._sm.set_dashboard(dashboard, True, 0)
     controller._handle_sleep_toggle()
     assert controller._sm.mode == "wake_confirm"
+
+
+@respx.mock
+def test_optimistic_update_after_feeding(controller: MacropadController):
+    """After logging a breast feeding, suggested_side flips and count increments."""
+    dashboard = DashboardData(
+        suggested_side="left",
+        today_counts={"feedings": 2, "diapers": 1},
+    )
+    controller._sm.set_dashboard(dashboard, True, 0)
+    respx.post(f"{BASE}/feedings").mock(
+        return_value=Response(201, json={"feeding": {"id": "f1"}})
+    )
+    respx.get(f"{BASE}/dashboard").mock(
+        return_value=Response(200, json={"dashboard": {}})
+    )
+    controller._dispatcher.call_api_and_confirm(
+        "baby_basics.log_feeding",
+        {"type": "breast", "started_side": "left"},
+        "Fed L", "breast_left", (102, 204, 102), "feeding", 0, "feedings",
+    )
+    assert dashboard.suggested_side == "right"
+    assert dashboard.today_counts["feedings"] == 3
+
+
+@respx.mock
+def test_optimistic_update_after_diaper(controller: MacropadController):
+    """After logging a diaper, count increments."""
+    dashboard = DashboardData(
+        today_counts={"feedings": 2, "diapers": 4},
+    )
+    controller._sm.set_dashboard(dashboard, True, 0)
+    respx.post(f"{BASE}/diapers").mock(
+        return_value=Response(201, json={"diaper": {"id": "d1"}})
+    )
+    respx.get(f"{BASE}/dashboard").mock(
+        return_value=Response(200, json={"dashboard": {}})
+    )
+    controller._dispatcher.call_api_and_confirm(
+        "baby_basics.log_diaper",
+        {"type": "pee"},
+        "Pee", "diaper_pee", (204, 170, 68), "diaper", 1, "diapers",
+    )
+    assert dashboard.today_counts["diapers"] == 5

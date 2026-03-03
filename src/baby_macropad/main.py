@@ -69,6 +69,7 @@ class MacropadController:
     def __init__(self, config: MacropadConfig) -> None:
         self.config = config
         self._shutdown = threading.Event()
+        self._display_lock = threading.Lock()
 
         # State machine (thread-safe)
         self._sm = StateMachine(DisplayState(
@@ -79,6 +80,11 @@ class MacropadController:
 
         # Settings model
         self._settings = SettingsModel.load()
+        self._sm.sync_settings(
+            self._settings.timer_duration_seconds,
+            self._settings.celebration_style,
+            self._settings.skip_breast_detail,
+        )
 
         # API client
         self.api_client = BabyBasicsClient(
@@ -173,57 +179,75 @@ class MacropadController:
     # --- Display ---
 
     def refresh_display(self) -> None:
-        s = self._sm.state
-        now = time.monotonic()
+        with self._display_lock:
+            s = self._sm.state
+            now = time.monotonic()
 
-        if s.mode == "sleep_mode":
-            elapsed, start_str = self._calc_sleep_elapsed()
-            screen = build_sleep_screen(elapsed, start_str)
-        elif s.mode == "wake_confirm" and now < s.wake_confirm_expires:
-            elapsed, _ = self._calc_sleep_elapsed()
-            elapsed_text = f"{elapsed // 60}h {elapsed % 60}m" if elapsed >= 60 else f"{elapsed}m"
-            screen = build_detail_screen(
-                title="End Sleep?",
-                options=[{"label": "WAKE", "key_num": 13, "selected": True}],
-                timer_seconds=max(0, int(s.wake_confirm_expires - now)),
-                category_color=(102, 153, 204),
-                hint="Wake Up",
-                subtitle=elapsed_text,
-            )
-        elif s.mode == "confirmation" and now < s.confirmation_expires:
-            screen = build_confirmation_screen(
-                s.confirmation_label, s.confirmation_context,
-                s.confirmation_icon, s.confirmation_category_color,
-                s.celebration_style,
-            )
-        elif s.mode == "detail" and (s.detail_timer_expires == 0.0 or now < s.detail_timer_expires):
-            cfg = DETAIL_CONFIGS.get(s.detail_action or "")
-            opts = [{"label": o["label"], "key_num": o.get("key", 11 + i), "selected": i == s.detail_default_index}
-                    for i, o in enumerate(s.detail_options)]
-            remaining = max(0, int(s.detail_timer_expires - now)) if s.detail_timer_expires > 0 else 0
-            screen = build_detail_screen(
-                cfg["title"] if cfg else "DETAIL", opts,
-                remaining,
-                cfg["category_color"] if cfg else (200, 200, 200),
-            )
-        elif s.mode == "notes_submenu":
-            cats = [{"label": c.label, "icon": getattr(c, "icon", None)} for c in self.config.notes_categories]
-            screen = build_selection_screen(cats, accent_color=(153, 153, 153))
-        elif s.mode == "settings":
-            screen = build_settings_screen(self._settings)
-        else:
-            if s.mode != "home_grid":
-                self._sm.return_home()
-            runtime_state = self._build_runtime_state()
-            screen = build_home_grid(self.config.buttons, runtime_state)
+            if s.mode == "sleep_mode":
+                elapsed, start_str = self._calc_sleep_elapsed()
+                screen = build_sleep_screen(elapsed, start_str)
+            elif s.mode == "wake_confirm" and now < s.wake_confirm_expires:
+                elapsed, _ = self._calc_sleep_elapsed()
+                if elapsed >= 60:
+                    elapsed_text = f"{elapsed // 60}h {elapsed % 60}m"
+                else:
+                    elapsed_text = f"{elapsed}m"
+                screen = build_detail_screen(
+                    title="End Sleep?",
+                    options=[{"label": "WAKE", "key_num": 13, "selected": True}],
+                    timer_seconds=max(0, int(s.wake_confirm_expires - now)),
+                    category_color=(102, 153, 204),
+                    hint="Wake Up",
+                    subtitle=elapsed_text,
+                )
+            elif s.mode == "confirmation" and now < s.confirmation_expires:
+                screen = build_confirmation_screen(
+                    s.confirmation_label, s.confirmation_context,
+                    s.confirmation_icon, s.confirmation_category_color,
+                    s.celebration_style,
+                )
+            elif s.mode == "detail" and (
+                s.detail_timer_expires == 0.0 or now < s.detail_timer_expires
+            ):
+                cfg = DETAIL_CONFIGS.get(s.detail_action or "")
+                opts = [
+                    {
+                        "label": o["label"],
+                        "key_num": o.get("key", 11 + i),
+                        "selected": i == s.detail_default_index,
+                    }
+                    for i, o in enumerate(s.detail_options)
+                ]
+                if s.detail_timer_expires > 0:
+                    remaining = max(0, int(s.detail_timer_expires - now))
+                else:
+                    remaining = 0
+                screen = build_detail_screen(
+                    cfg["title"] if cfg else "DETAIL", opts,
+                    remaining,
+                    cfg["category_color"] if cfg else (200, 200, 200),
+                )
+            elif s.mode == "notes_submenu":
+                cats = [
+                    {"label": c.label, "icon": getattr(c, "icon", None)}
+                    for c in self.config.notes_categories
+                ]
+                screen = build_selection_screen(cats, accent_color=(153, 153, 153))
+            elif s.mode == "settings":
+                screen = build_settings_screen(self._settings)
+            else:
+                if s.mode != "home_grid":
+                    self._sm.return_home()
+                runtime_state = self._build_runtime_state()
+                screen = build_home_grid(self.config.buttons, runtime_state)
 
-        self._router.set_screen(screen)
-        try:
-            jpeg = self._renderer.render(screen)
-            self._device.set_screen_image(jpeg)
-            logger.debug("Display refreshed: mode=%s, %d bytes", s.mode, len(jpeg))
-        except Exception:
-            logger.exception("Failed to refresh display")
+            self._router.set_screen(screen)
+            try:
+                jpeg = self._renderer.render(screen)
+                self._device.set_screen_image(jpeg)
+                logger.debug("Display refreshed: mode=%s, %d bytes", s.mode, len(jpeg))
+            except Exception:
+                logger.exception("Failed to refresh display")
 
     def _calc_sleep_elapsed(self) -> tuple[int, str]:
         start_time = self._sm.get_sleep_start_time()

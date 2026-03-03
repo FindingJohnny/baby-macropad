@@ -231,6 +231,8 @@ class ActionDispatcher:
     def _play_celebration(self, category_color: tuple[int, int, int], icon: str,
                           label: str, context: str, style: str) -> None:
         """Play 4-frame compass rose expansion animation (~500ms total)."""
+        if style == "none":
+            return
         from baby_macropad.ui.screens.confirmation import build_confirmation_screen
         for frame_idx in range(4):
             try:

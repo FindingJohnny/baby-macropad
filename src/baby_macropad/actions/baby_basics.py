@@ -122,6 +122,11 @@ class BabyBasicsClient:
         resp = self._client.post("/notes", json=params)
         return self._handle_response(resp)
 
+    def delete_resource(self, resource_type: str, resource_id: str) -> dict[str, Any]:
+        """DELETE /children/:childId/:resourceType/:id"""
+        resp = self._client.delete(f"/{resource_type}/{resource_id}")
+        return self._handle_response(resp)
+
     def get_dashboard(self) -> DashboardData:
         """GET /children/:childId/dashboard"""
         resp = self._client.get("/dashboard")

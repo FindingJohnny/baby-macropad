@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any
+
+from baby_macropad.device import DeviceProtocol
 
 # Category colors for LED feedback
 CATEGORY_COLORS = {
@@ -34,7 +35,7 @@ class LedController:
     a previous animation is still running, the old one exits early.
     """
 
-    def __init__(self, device: Any) -> None:
+    def __init__(self, device: DeviceProtocol) -> None:
         self._device = device
         self._generation = 0
         self._lock = threading.Lock()

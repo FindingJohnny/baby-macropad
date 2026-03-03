@@ -138,6 +138,26 @@ class TestTransitions:
         assert len(sm.state.recent_actions) == 0
 
 
+class TestSyncSettings:
+    def test_sync_settings_updates_state(self):
+        sm = StateMachine(DisplayState())
+        sm.sync_settings(timer_seconds=15, celebration_style="none", skip_breast_detail=True)
+        assert sm.state.timer_seconds == 15
+        assert sm.state.celebration_style == "none"
+        assert sm.state.skip_breast_detail is True
+
+    def test_sync_settings_overrides_initial(self):
+        state = DisplayState(
+            timer_seconds=5, celebration_style="color_fill",
+            skip_breast_detail=False,
+        )
+        sm = StateMachine(state)
+        sm.sync_settings(timer_seconds=10, celebration_style="none", skip_breast_detail=True)
+        assert sm.state.timer_seconds == 10
+        assert sm.state.celebration_style == "none"
+        assert sm.state.skip_breast_detail is True
+
+
 class TestConcurrentThreadSafety:
     def test_atomic_snapshot_consistency(self):
         """Concurrent key handler and tick thread should never see inconsistent state.

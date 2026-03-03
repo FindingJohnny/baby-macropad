@@ -260,6 +260,35 @@ def test_sleep_toggle_starts_sleep(controller: MacropadController):
     assert controller._sm.mode == "sleep_mode"
 
 
+def test_controller_has_display_lock(controller: MacropadController):
+    """Controller should have a _display_lock attribute."""
+    assert hasattr(controller, "_display_lock")
+    import threading
+    assert isinstance(controller._display_lock, type(threading.Lock()))
+
+
+def test_celebration_none_skips_rendering(controller: MacropadController):
+    """_play_celebration with style='none' should not render any frames."""
+    device = controller._device
+    device.set_screen_image = MagicMock()
+    controller._dispatcher._play_celebration(
+        category_color=(102, 204, 102),
+        icon="breast_left",
+        label="Fed L",
+        context="",
+        style="none",
+    )
+    device.set_screen_image.assert_not_called()
+
+
+def test_settings_synced_on_startup(controller: MacropadController):
+    """After construction, state machine should have SettingsModel defaults."""
+    state = controller._sm.state
+    assert state.timer_seconds == 7
+    assert state.celebration_style == "color_fill"
+    assert state.skip_breast_detail is False
+
+
 def test_sleep_toggle_active_enters_wake_confirm(controller: MacropadController):
     """_handle_sleep_toggle() with active_sleep in dashboard enters wake_confirm."""
     active_sleep = {"id": "s1", "start_time": "2026-01-01T00:00:00Z"}

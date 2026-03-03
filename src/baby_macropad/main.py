@@ -205,6 +205,8 @@ class MacropadController:
                     s.confirmation_label, s.confirmation_context,
                     s.confirmation_category_color,
                     resource_id=s.confirmation_resource_id,
+                    icon=s.confirmation_icon,
+                    layout=self._settings.confirmation_layout,
                 )
             elif s.mode == "detail" and (
                 s.detail_timer_expires == 0.0 or now < s.detail_timer_expires

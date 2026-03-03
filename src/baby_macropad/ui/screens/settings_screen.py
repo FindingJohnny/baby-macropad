@@ -21,15 +21,20 @@ def _format_value(field_name: str, value, extra: dict) -> str:
     if isinstance(value, bool):
         return "ON" if value else "OFF"
     # Map known string values to short labels
-    style_map = {
+    _SHORT_LABELS = {
         "flash": "Flash",
         "starburst": "Burst",
         "sparkle": "Sparkle",
         "spotlight": "Spot",
         "none": "Off",
+        "banner": "Banner",
+        "center_stage": "Center",
+        "full_icon": "Icon",
+        "split": "Split",
+        "minimal": "Mini",
     }
-    if isinstance(value, str) and value in style_map:
-        return style_map[value]
+    if isinstance(value, str) and value in _SHORT_LABELS:
+        return _SHORT_LABELS[value]
     return str(value)
 
 

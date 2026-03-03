@@ -126,73 +126,98 @@ class TestDetailScreen:
 
 
 class TestConfirmationScreen:
-    def test_renders_valid_jpeg(self):
-        screen = build_confirmation_screen(
-            action_label="Left breast logged",
-            context_line="Next: Right breast",
-            category_color=(102, 204, 102),
-        )
-        data = renderer.render(screen)
-        _validate_jpeg(data)
+    """Test all 5 confirmation layout variants."""
 
-    def test_color_header_visible(self):
-        """Top row should be filled with category color."""
-        screen = build_confirmation_screen(
-            action_label="Logged",
-            context_line="",
-            category_color=(102, 153, 204),
-        )
-        data = renderer.render(screen)
-        img = _validate_jpeg(data)
-        # Sample a pixel in top row center (key 13 area)
-        # VIS_COL_X[2]=203, VIS_ROW_Y[0]=10
-        px = img.getpixel((220, 30))
-        bg = (28, 28, 30)
-        assert px != bg, f"Expected non-background pixel in top row, got {px}"
+    _LAYOUTS = ["banner", "center_stage", "full_icon", "split", "minimal"]
+    _COLOR = (102, 204, 102)
 
-    def test_done_at_key_5(self):
-        screen = build_confirmation_screen(
-            action_label="Test",
-            context_line="",
-            category_color=(102, 153, 204),
-        )
-        assert 5 in screen.cells
-        assert screen.cells[5].on_press == "done"
+    def test_all_layouts_render_valid_jpeg(self):
+        for layout in self._LAYOUTS:
+            screen = build_confirmation_screen(
+                action_label="Fed L",
+                context_line="5 feedings",
+                category_color=self._COLOR,
+                icon="breast_left",
+                layout=layout,
+            )
+            data = renderer.render(screen)
+            _validate_jpeg(data)
 
-    def test_undo_shown_with_resource_id(self):
-        screen = build_confirmation_screen(
-            action_label="Test",
-            context_line="",
-            category_color=(102, 153, 204),
-            resource_id="abc-123",
-        )
-        assert 1 in screen.cells
-        assert screen.cells[1].on_press == "undo"
+    def test_all_layouts_have_done_button(self):
+        for layout in self._LAYOUTS:
+            screen = build_confirmation_screen(
+                action_label="Test",
+                context_line="",
+                category_color=self._COLOR,
+                layout=layout,
+            )
+            done_found = any(
+                c.on_press == "done" for c in screen.cells.values()
+            )
+            assert done_found, f"Layout '{layout}' missing DONE button"
 
-    def test_undo_hidden_without_resource_id(self):
-        screen = build_confirmation_screen(
-            action_label="Test",
-            context_line="",
-            category_color=(102, 153, 204),
-        )
-        assert 1 not in screen.cells
+    def test_all_layouts_show_undo_with_resource_id(self):
+        for layout in self._LAYOUTS:
+            screen = build_confirmation_screen(
+                action_label="Test",
+                context_line="",
+                category_color=self._COLOR,
+                resource_id="abc-123",
+                layout=layout,
+            )
+            undo_found = any(
+                c.on_press == "undo" for c in screen.cells.values()
+            )
+            assert undo_found, f"Layout '{layout}' missing UNDO with resource_id"
 
-    def test_checkmark_at_key_13(self):
-        screen = build_confirmation_screen(
-            action_label="Test",
-            context_line="",
-            category_color=(102, 204, 102),
-        )
-        assert 13 in screen.cells
+    def test_all_layouts_hide_undo_without_resource_id(self):
+        for layout in self._LAYOUTS:
+            screen = build_confirmation_screen(
+                action_label="Test",
+                context_line="",
+                category_color=self._COLOR,
+                layout=layout,
+            )
+            undo_found = any(
+                c.on_press == "undo" for c in screen.cells.values()
+            )
+            assert not undo_found, f"Layout '{layout}' shows UNDO without resource_id"
 
-    def test_top_row_all_colored(self):
+    def test_banner_top_row_colored(self):
         screen = build_confirmation_screen(
-            action_label="Test",
-            context_line="",
-            category_color=(102, 204, 102),
+            action_label="Test", context_line="",
+            category_color=self._COLOR, layout="banner",
         )
         for key in (11, 12, 13, 14, 15):
             assert key in screen.cells
+
+    def test_full_icon_has_colored_background(self):
+        screen = build_confirmation_screen(
+            action_label="Test", context_line="",
+            category_color=self._COLOR, layout="full_icon",
+        )
+        assert screen.background_color == self._COLOR
+
+    def test_multiline_label(self):
+        for layout in self._LAYOUTS:
+            screen = build_confirmation_screen(
+                action_label="Pee +\nPoop",
+                context_line="3 diapers",
+                category_color=(204, 170, 68),
+                icon="diaper_both",
+                layout=layout,
+            )
+            data = renderer.render(screen)
+            _validate_jpeg(data)
+
+    def test_unknown_layout_falls_back_to_banner(self):
+        screen = build_confirmation_screen(
+            action_label="Test", context_line="",
+            category_color=self._COLOR, layout="nonexistent",
+        )
+        # Should not crash, falls back to banner
+        data = renderer.render(screen)
+        _validate_jpeg(data)
 
 
 class TestSelectionScreen:
@@ -244,8 +269,9 @@ class TestSettingsScreen:
         screen = build_settings_screen(settings)
         # Should have cards for non-hidden fields + BACK + title
         # Non-hidden fields: timer_duration_seconds, skip_breast_detail,
-        # celebration_style, brightness = 4 fields + 1 BACK + 1 title = 6 cells
-        assert len(screen.cells) == 6
+        # celebration_style, confirmation_layout, brightness = 5 fields
+        # + 1 BACK + 1 title = 7 cells
+        assert len(screen.cells) == 7
 
     def test_back_at_key_1(self):
         settings = SettingsModel()

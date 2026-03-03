@@ -12,6 +12,7 @@ class TestSettingsDefaults:
         assert s.timer_duration_seconds == 7
         assert s.skip_breast_detail is False
         assert s.celebration_style == "flash"
+        assert s.confirmation_layout == "banner"
         assert s.brightness == 80
         assert s.tutorial_completed is False
 
@@ -65,6 +66,23 @@ class TestCycleField:
             assert s.celebration_style == "none"
             s.cycle_field("celebration_style")
             assert s.celebration_style == "flash"
+
+    def test_cycle_confirmation_layout(self, tmp_path: Path):
+        with (
+            patch("baby_macropad.settings._SETTINGS_FILE", tmp_path / "s.yaml"),
+            patch("baby_macropad.settings._SETTINGS_DIR", tmp_path),
+        ):
+            s = SettingsModel(confirmation_layout="banner")
+            s.cycle_field("confirmation_layout")
+            assert s.confirmation_layout == "center_stage"
+            s.cycle_field("confirmation_layout")
+            assert s.confirmation_layout == "full_icon"
+            s.cycle_field("confirmation_layout")
+            assert s.confirmation_layout == "split"
+            s.cycle_field("confirmation_layout")
+            assert s.confirmation_layout == "minimal"
+            s.cycle_field("confirmation_layout")
+            assert s.confirmation_layout == "banner"
 
     def test_cycle_brightness(self, tmp_path: Path):
         with (

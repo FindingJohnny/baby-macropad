@@ -492,11 +492,9 @@ class MacropadController:
                 self._dispatcher.commit_detail_default()
             elif tick.action == "wake_confirm_expired":
                 self._sleep_mgr.handle_wake_up()
-            elif tick.action == "refresh" and tick.mode == "home_grid":
-                self._sm.clear_home_dirty()
-                self.refresh_display()
-                self._check_brightness_schedule()
             elif tick.action == "refresh":
+                if tick.mode == "home_grid":
+                    self._sm.clear_home_dirty()
                 self.refresh_display()
             elif tick.mode == "home_grid":
                 self._check_brightness_schedule()

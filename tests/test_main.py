@@ -303,14 +303,13 @@ def test_dashboard_refresh_marks_home_dirty(controller: MacropadController):
 def test_tick_clears_dirty_on_home_refresh(controller: MacropadController):
     """Tick loop handler clears dirty flag when refreshing home grid."""
     controller._sm.mark_home_dirty()
-    assert controller._sm.state._home_dirty is True
     # Simulate what _display_tick_loop does for home_grid refresh
     import time as t
     tick = controller._sm.advance_tick(t.monotonic())
     assert tick.action == "refresh"
     assert tick.mode == "home_grid"
-    controller._sm.clear_home_dirty()
-    assert controller._sm.state._home_dirty is False
+    assert controller._sm.clear_home_dirty() is True
+    assert controller._sm.clear_home_dirty() is False
 
 
 def test_sleep_toggle_active_enters_wake_confirm(controller: MacropadController):

@@ -367,9 +367,11 @@ class MacropadController:
 
     def _handle_confirmation_press(self, key: int, snap: Any) -> None:
         if key == 1 and snap.state.confirmation_resource_id:
+            self._dispatcher.cancel_celebration()
             self._undo_mgr.execute_undo()
             return
         if key == 5:
+            self._dispatcher.cancel_celebration()
             self._sm.return_home()
             self.refresh_display()
             return

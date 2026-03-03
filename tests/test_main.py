@@ -132,6 +132,13 @@ def test_key_press_enters_detail(controller: MacropadController):
     assert controller._sm.mode == "detail"
 
 
+def _wait_for_background(controller: MacropadController, timeout: float = 5.0) -> None:
+    """Wait for dispatcher's background thread to complete."""
+    thread = controller._dispatcher._background_thread
+    if thread is not None:
+        thread.join(timeout=timeout)
+
+
 @respx.mock
 def test_key_press_success(controller: MacropadController):
     respx.post(f"{BASE}/diapers").mock(
@@ -145,10 +152,12 @@ def test_key_press_success(controller: MacropadController):
     controller._on_key_press(2, True)
     assert controller._sm.mode == "detail"
 
-    # Simulate timer expiry → commits default option → API called
+    # Simulate timer expiry → commits default option → confirmation shown immediately
     controller._commit_detail_default()
+    assert controller._sm.mode == "confirmation"
 
-    # Verify the API was called
+    # Wait for background API call to complete
+    _wait_for_background(controller)
     assert respx.routes[0].called
 
 
@@ -164,9 +173,8 @@ def test_key_press_offline_queues_event(controller: MacropadController):
     # Simulate timer expiry → commits default option → queued offline
     controller._commit_detail_default()
 
-    # Wait briefly for background refresh thread to finish
-    import time
-    time.sleep(0.1)
+    # Wait for background thread to complete
+    _wait_for_background(controller)
 
     assert controller.queue.count() >= 1
     events = controller.queue.peek()
@@ -335,13 +343,14 @@ def test_done_key_returns_home(controller: MacropadController):
     respx.get(f"{BASE}/dashboard").mock(
         return_value=Response(200, json={"dashboard": {}})
     )
-    # Enter detail and commit to get to confirmation
+    # Enter detail and commit to get to confirmation (shown immediately)
     controller._on_key_press(2, True)  # physical 2 → logical 12 (PEE)
     controller._commit_detail_default()
     assert controller._sm.mode == "confirmation"
-    # Press DONE (physical 15 → logical 5)
+    # Press DONE (physical 15 → logical 5) — cancels celebration too
     controller._on_key_press(15, True)
     assert controller._sm.mode == "home_grid"
+    _wait_for_background(controller)
 
 
 @respx.mock
@@ -359,6 +368,7 @@ def test_other_keys_ignored_during_confirmation(controller: MacropadController):
     # Press key 3 (physical 13 → logical 3) — should stay in confirmation
     controller._on_key_press(13, True)
     assert controller._sm.mode == "confirmation"
+    _wait_for_background(controller)
 
 
 def test_dashboard_refresh_marks_home_dirty(controller: MacropadController):
@@ -412,6 +422,7 @@ def test_optimistic_update_after_feeding(controller: MacropadController):
         {"type": "breast", "started_side": "left"},
         "Fed L", "breast_left", (102, 204, 102), "feeding", 0, "feedings",
     )
+    _wait_for_background(controller)
     assert dashboard.suggested_side == "right"
     assert dashboard.today_counts["feedings"] == 3
 
@@ -434,4 +445,5 @@ def test_optimistic_update_after_diaper(controller: MacropadController):
         {"type": "pee"},
         "Pee", "diaper_pee", (204, 170, 68), "diaper", 1, "diapers",
     )
+    _wait_for_background(controller)
     assert dashboard.today_counts["diapers_pee"] == 4

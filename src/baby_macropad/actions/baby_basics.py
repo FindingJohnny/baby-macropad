@@ -11,8 +11,8 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Timeout: 10s connect, 30s total (Pi on WiFi can be slow)
-DEFAULT_TIMEOUT = httpx.Timeout(10.0, read=30.0)
+# Timeout: 3s connect, 5s read (LAN device, queue offline if unreachable)
+DEFAULT_TIMEOUT = httpx.Timeout(3.0, read=5.0)
 
 
 @dataclass

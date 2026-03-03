@@ -138,6 +138,8 @@ class ActionDispatcher:
         self._renderer = renderer
         self._refresh_display = refresh_display
         self._refresh_dashboard = refresh_dashboard
+        self._celebration_cancelled = threading.Event()
+        self._background_thread: threading.Thread | None = None
 
     def enter_detail_screen(self, detail_key: str) -> None:
         cfg = DETAIL_CONFIGS.get(detail_key)
@@ -193,6 +195,33 @@ class ActionDispatcher:
         self, api_action: str, params: dict, label: str, icon: str,
         category_color: tuple[int, int, int], category: str, column: int, resource_type: str,
     ) -> None:
+        # Show confirmation screen immediately (optimistic)
+        self._celebration_cancelled.clear()
+        self._sm.enter_confirmation(
+            api_action, label, "Logging\u2026", icon, category_color, column,
+            time.monotonic() + CONFIRMATION_DURATION, None, resource_type,
+        )
+        self._refresh_display()
+
+        # API call + celebration happen in background
+        self._background_thread = threading.Thread(
+            target=self._background_api_and_celebrate,
+            args=(api_action, params, label, icon, category_color, category, column, resource_type),
+            daemon=True,
+        )
+        self._background_thread.start()
+
+    def cancel_celebration(self) -> None:
+        """Cancel any running celebration animation."""
+        self._celebration_cancelled.set()
+
+    def _background_api_and_celebrate(
+        self, api_action: str, params: dict, label: str, icon: str,
+        category_color: tuple[int, int, int], category: str, column: int, resource_type: str,
+    ) -> None:
+        """Run celebration + API call in background thread."""
+        self._play_celebration(category_color, self._sm.state.celebration_style)
+
         resource_id = None
         context_line = ""
         try:
@@ -221,21 +250,23 @@ class ActionDispatcher:
                 "resource_id": resource_id, "resource_type": resource_type,
                 "label": label, "timestamp": datetime.now(UTC).isoformat(),
             })
-        self._sm.enter_confirmation(
-            api_action, label, context_line, icon, category_color, column,
-            time.monotonic() + CONFIRMATION_DURATION, resource_id, resource_type,
-        )
-        self._play_celebration(category_color, self._sm.state.celebration_style)
-        self._refresh_display()
-        threading.Thread(target=self._refresh_dashboard, daemon=True).start()
+
+        # Only update display if user hasn't navigated away
+        if self._sm.mode == "confirmation":
+            self._sm.update_confirmation(context_line, resource_id, resource_type)
+            self._refresh_display()
+
+        self._refresh_dashboard()
 
     def _play_celebration(self, category_color: tuple[int, int, int],
                           style: str) -> None:
-        """Play celebration animation before showing confirmation screen."""
+        """Play celebration animation (interruptible via _celebration_cancelled)."""
         if style == "none":
             return
         frames = self._build_celebration_frames(category_color, style)
         for i, frame_jpeg in enumerate(frames):
+            if self._celebration_cancelled.is_set():
+                break
             try:
                 self._device.set_screen_image(frame_jpeg)
                 time.sleep(0.08)

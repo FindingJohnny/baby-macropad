@@ -15,8 +15,8 @@ from typing import Any
 
 from baby_macropad.state import DisplayState, ScreenMode
 
-# Debounce reduced from 300ms to 150ms (allows genuine rapid presses)
-DEBOUNCE_SECONDS = 0.15
+# Debounce: 100ms prevents mechanical bounce, allows fast intentional presses
+DEBOUNCE_SECONDS = 0.10
 
 
 @dataclass
@@ -140,6 +140,23 @@ class StateMachine:
                 action, label, context, icon, category_color,
                 column, expires, resource_id, resource_type,
             )
+
+    def update_confirmation(
+        self,
+        context: str | None = None,
+        resource_id: str | None = None,
+        resource_type: str | None = None,
+    ) -> None:
+        """Update confirmation screen fields without resetting the timer."""
+        with self._lock:
+            if self._state.mode != "confirmation":
+                return
+            if context is not None:
+                self._state.confirmation_context = context
+            if resource_id is not None:
+                self._state.confirmation_resource_id = resource_id
+            if resource_type is not None:
+                self._state.confirmation_resource_type = resource_type
 
     def enter_wake_confirm(self, expires: float, from_sleep: bool = False) -> None:
         with self._lock:

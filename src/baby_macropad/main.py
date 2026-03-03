@@ -135,7 +135,6 @@ _ICON_TO_DETAIL: dict[str, str] = {
     "breast_left": "breast_left", "breast_right": "breast_right",
     "bottle": "bottle", "diaper_pee": "pee", "diaper_poop": "poop", "diaper_both": "both",
 }
-_INSTANT_ACTIONS: set[str] = set()
 _KEY_TO_COLUMN: dict[int, int] = {
     11: 0, 6: 0, 1: 0, 12: 1, 7: 1, 2: 1, 13: 2, 8: 2, 3: 2,
     14: 3, 9: 3, 4: 3, 15: 4, 10: 4, 5: 4,
@@ -294,7 +293,7 @@ class MacropadController:
         try:
             jpeg = self._renderer.render(screen)
             self._device.set_screen_image(jpeg)
-            logger.info("Display refreshed: mode=%s, %d bytes", s.mode, len(jpeg))
+            logger.debug("Display refreshed: mode=%s, %d bytes", s.mode, len(jpeg))
         except Exception:
             logger.exception("Failed to refresh display")
 
@@ -781,7 +780,14 @@ class MacropadController:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(name)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-    logger.info("Baby Basics Macropad v0.3.0")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    from importlib.metadata import version as pkg_version
+    try:
+        _version = pkg_version("baby-macropad")
+    except Exception:
+        _version = "dev"
+    logger.info("Baby Basics Macropad v%s", _version)
     try:
         config = load_config()
     except Exception as e:

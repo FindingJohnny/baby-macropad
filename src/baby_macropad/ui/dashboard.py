@@ -7,9 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 from .framework.primitives import BG_COLOR, SCREEN_H, SCREEN_W, SECONDARY_TEXT
+from .framework.text_engine import get_font
 
 logger = logging.getLogger(__name__)
 
@@ -26,35 +27,6 @@ SUCCESS_COLOR = (102, 187, 106)   # bbSuccess dark
 WARNING_COLOR = (255, 167, 38)    # bbWarning dark
 ERROR_COLOR = (239, 83, 80)       # bbDanger dark
 
-
-def _get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    """Load DejaVu Sans or fall back to default."""
-    font_paths = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/System/Library/Fonts/Helvetica.ttc",
-    ]
-    for path in font_paths:
-        if Path(path).exists():
-            try:
-                return ImageFont.truetype(path, size)
-            except OSError:
-                continue
-    return ImageFont.load_default()
-
-
-def _get_bold_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    bold_paths = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/System/Library/Fonts/Helvetica.ttc",
-    ]
-    for path in bold_paths:
-        if Path(path).exists():
-            try:
-                return ImageFont.truetype(path, size)
-            except OSError:
-                continue
-    return _get_font(size)
 
 
 def _elapsed_str(timestamp_str: str | None) -> str:
@@ -116,10 +88,10 @@ def render_dashboard(
     img = Image.new("RGB", SCREEN_SIZE, BG_COLOR)
     draw = ImageDraw.Draw(img)
 
-    font_sm = _get_font(14)
-    font_md = _get_font(18)
-    font_lg = _get_bold_font(24)
-    font_xl = _get_bold_font(28)
+    font_sm = get_font(14, bold=False)
+    font_md = get_font(18, bold=False)
+    font_lg = get_font(24, bold=True)
+    font_xl = get_font(28, bold=True)
 
     # === Top bar: Clock + Connection ===
     now_str = datetime.now().strftime("%I:%M %p")

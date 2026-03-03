@@ -689,9 +689,7 @@ class MacropadController:
         threading.Thread(target=self._refresh_dashboard, daemon=True).start()
 
     def _delete_resource(self, resource_type: str, resource_id: str) -> None:
-        resp = self.api_client._client.delete(f"/{resource_type}/{resource_id}")
-        if resp.status_code >= 400:
-            raise BabyBasicsAPIError(resp.status_code, resp.text)
+        self.api_client.delete_resource(resource_type, resource_id)
 
     def _dispatch_action(self, action: str, params: dict) -> Any:
         if action == "baby_basics.log_feeding":

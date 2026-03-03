@@ -7,7 +7,10 @@ to render the current display and handle key presses correctly.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from baby_macropad.actions.baby_basics import DashboardData
 
 ScreenMode = Literal[
     "home_grid",
@@ -55,7 +58,7 @@ class DisplayState:
     ended_sleep_id: str | None = None
 
     # Live data (from dashboard API)
-    dashboard: object | None = None
+    dashboard: DashboardData | None = None
     connected: bool = True
     queued_count: int = 0
 

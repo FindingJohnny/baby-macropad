@@ -30,6 +30,7 @@ from baby_macropad.offline.queue import OfflineQueue
 from baby_macropad.offline.sync import SyncWorker
 from baby_macropad.settings import SettingsModel
 from baby_macropad.state import DisplayState
+from baby_macropad.ui.framework.primitives import ICON_COLORS
 from baby_macropad.ui.framework.screen import ScreenRenderer
 from baby_macropad.ui.key_router import KeyRouter
 from baby_macropad.ui.led import LedController
@@ -285,6 +286,28 @@ class MacropadController:
                     rs[key_num] = "suggested"
         return rs
 
+    # --- Press feedback ---
+
+    def _show_press_feedback(self, key: int, mode: str) -> None:
+        """Push a quick highlight overlay on the pressed cell.
+
+        Only active on home_grid — other screens have their own visual
+        affordances. Runs synchronously on the key handler thread so the
+        highlight is visible before the action handler's full re-render.
+        """
+        if mode != "home_grid":
+            return
+        button = self.config.buttons.get(key)
+        if not button:
+            return
+        color = ICON_COLORS.get(button.icon, (255, 255, 255))
+        jpeg = self._renderer.render_press_feedback(key, color)
+        if jpeg:
+            try:
+                self._device.set_screen_image(jpeg)
+            except Exception:
+                pass  # Non-critical — action handler will refresh anyway
+
     # --- Key handling ---
 
     @staticmethod
@@ -313,6 +336,7 @@ class MacropadController:
             return  # debounced
 
         self._led.flash_acknowledge()
+        self._show_press_feedback(key, snap.mode)
         logger.info("Key %d pressed (mode=%s)", key, snap.mode)
 
         if snap.mode == "home_grid":

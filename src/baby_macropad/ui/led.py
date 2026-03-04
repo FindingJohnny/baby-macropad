@@ -155,14 +155,19 @@ class LedController:
     def _flash_simple(
         self, r: int, g: int, b: int, brightness: int = 50, duration: float = 0.5
     ) -> None:
-        """Flash a single color then turn off. Generation-counter protected."""
-        gen = self._next_gen()
+        """Flash a single color then turn off. Generation-counter protected.
 
-        def _do_flash():
-            self._device.set_led_color(r, g, b)
-            self._device.set_led_brightness(brightness)
+        LED-on commands run synchronously on the caller's thread so they
+        execute BEFORE any screen refresh grabs the write lock. Only the
+        delayed turn-off runs in a background thread.
+        """
+        gen = self._next_gen()
+        self._device.set_led_color(r, g, b)
+        self._device.set_led_brightness(brightness)
+
+        def _turn_off():
             time.sleep(duration)
             if self._is_current(gen):
                 self._device.turn_off_leds()
 
-        threading.Thread(target=_do_flash, daemon=True).start()
+        threading.Thread(target=_turn_off, daemon=True).start()

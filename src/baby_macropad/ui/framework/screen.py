@@ -50,6 +50,9 @@ class ScreenDef:
 class ScreenRenderer:
     """Renders a ScreenDef to 480x272 JPEG bytes."""
 
+    def __init__(self) -> None:
+        self._cached_canvas: Image.Image | None = None
+
     def render(self, screen: ScreenDef) -> bytes:
         img = Image.new("RGB", (SCREEN_W, SCREEN_H), screen.background_color)
         draw = ImageDraw.Draw(img)
@@ -76,6 +79,35 @@ class ScreenRenderer:
 
             cell.widget.render(img, draw, rect)
 
+        self._cached_canvas = img.copy()
+
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=90)
+        return buf.getvalue()
+
+    def render_press_feedback(
+        self, key_num: int, color: tuple[int, int, int], alpha: float = 0.35,
+    ) -> bytes | None:
+        """Render a press highlight by blending color onto the cached canvas.
+
+        Returns JPEG bytes, or None if no cached canvas is available.
+        Skips the full widget tree — just paste + encode.
+        """
+        if self._cached_canvas is None:
+            return None
+        pos = key_to_grid(key_num)
+        if pos is None:
+            return None
+        col, row = pos
+        x, y = VIS_COL_X[col], VIS_ROW_Y[row]
+        w, h = VIS_COL_W[col], VIS_ROW_H[row]
+
+        img = self._cached_canvas.copy()
+        region = img.crop((x, y, x + w, y + h))
+        overlay = Image.new("RGB", (w, h), color)
+        blended = Image.blend(region, overlay, alpha)
+        img.paste(blended, (x, y))
+
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
         return buf.getvalue()

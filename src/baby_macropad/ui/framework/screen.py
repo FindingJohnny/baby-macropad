@@ -82,7 +82,7 @@ class ScreenRenderer:
         self._cached_canvas = img.copy()
 
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=90)
+        img.save(buf, format="JPEG", quality=65)
         return buf.getvalue()
 
     def render_press_feedback(
@@ -109,5 +109,5 @@ class ScreenRenderer:
         img.paste(blended, (x, y))
 
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=85)
+        img.save(buf, format="JPEG", quality=50)
         return buf.getvalue()

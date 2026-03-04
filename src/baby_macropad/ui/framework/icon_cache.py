@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 logger = logging.getLogger(__name__)
 
@@ -36,20 +36,13 @@ def load_and_tint(asset_name: str, color: tuple[int, int, int], size: int) -> Im
     icon = Image.open(png_path).convert("RGBA")
     icon = icon.resize((size, size), Image.LANCZOS)
 
-    # Tint: multiply white pixels by color, preserving alpha
-    r, g, b = color
-    pixels = icon.load()
-    for y in range(icon.height):
-        for x in range(icon.width):
-            pr, pg, pb, pa = pixels[x, y]
-            if pa > 0:
-                # Scale the white pixel by the target color
-                pixels[x, y] = (
-                    pr * r // 255,
-                    pg * g // 255,
-                    pb * b // 255,
-                    pa,
-                )
+    # Tint: multiply RGB by target color, preserving alpha (PIL C operations)
+    rgb = icon.convert("RGB")
+    alpha = icon.split()[3]
+    color_layer = Image.new("RGB", icon.size, color)
+    tinted_rgb = ImageChops.multiply(rgb, color_layer)
+    icon = tinted_rgb.copy()
+    icon.putalpha(alpha)
 
     _icon_cache[cache_key] = icon
     return icon

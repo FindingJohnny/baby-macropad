@@ -313,8 +313,8 @@ class StreamDockDevice:
                 0x4C, 0x42, 0x4C, 0x49, 0x47,  # "LBLIG"
                 0x00, 0x00, level,
             ])))
-        except OSError:
-            pass
+        except OSError as e:
+            logger.warning("Failed to set LED brightness: %s", e)
 
     def turn_off_leds(self) -> None:
         """Turn off the LED ring."""

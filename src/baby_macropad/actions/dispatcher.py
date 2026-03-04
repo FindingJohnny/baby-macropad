@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from baby_macropad.actions.baby_basics import BabyBasicsAPIError, DashboardData
+from baby_macropad.ui.framework.celebration import render_celebration_frames as _render_celebration_frames
 
 if TYPE_CHECKING:
     from baby_macropad.actions.baby_basics import BabyBasicsClient
@@ -219,13 +220,15 @@ class ActionDispatcher:
         self, api_action: str, params: dict, label: str, icon: str,
         category_color: tuple[int, int, int], category: str, column: int, resource_type: str,
     ) -> None:
-        """Run celebration + API call in background thread."""
-        self._play_celebration(category_color, self._sm.state.celebration_style)
+        """Run API call first (fast response), then celebration in background."""
+        t0 = time.monotonic()
 
         resource_id = None
         context_line = ""
         try:
             result = self.dispatch_action(api_action, params)
+            t_api = time.monotonic()
+            logger.info("API call %s took %.1fms", api_action, (t_api - t0) * 1000)
             if isinstance(result, dict):
                 for k in (resource_type[:-1], resource_type):
                     if k in result and isinstance(result[k], dict):
@@ -240,7 +243,8 @@ class ActionDispatcher:
         except (
             BabyBasicsAPIError, ConnectionError, httpx.TimeoutException, httpx.ConnectError
         ) as e:
-            logger.warning("Action failed, queueing offline: %s", e)
+            logger.warning("Action failed (%.1fms), queueing offline: %s",
+                           (time.monotonic() - t0) * 1000, e)
             self._get_queue().enqueue(api_action, params)
             context_line = "Queued"
             self._led.flash_queued()
@@ -251,10 +255,13 @@ class ActionDispatcher:
                 "label": label, "timestamp": datetime.now(UTC).isoformat(),
             })
 
-        # Only update display if user hasn't navigated away
+        # Update display if user hasn't navigated away
         if self._sm.mode == "confirmation":
             self._sm.update_confirmation(context_line, resource_id, resource_type)
             self._refresh_display()
+
+        # Celebration after API + display update (visual candy, not blocking)
+        self._play_celebration(category_color, self._sm.state.celebration_style)
 
         self._refresh_dashboard()
 
@@ -287,8 +294,7 @@ class ActionDispatcher:
         - sparkle: 2 frames — scattered bright circles, alternating positions
         - spotlight: 2 frames — tight center glow, then expanded
         """
-        from baby_macropad.ui.framework.celebration import render_celebration_frames
-        return render_celebration_frames(category_color, style)
+        return _render_celebration_frames(category_color, style)
 
     def _build_context_line(self, category: str) -> str:
         dashboard = self._sm.state.dashboard

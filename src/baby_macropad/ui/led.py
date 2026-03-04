@@ -50,9 +50,9 @@ class LedController:
             return self._generation == gen
 
     def flash_acknowledge(self) -> None:
-        """Immediate white flash on any key press (150ms)."""
+        """Immediate white flash on any key press (500ms)."""
         r, g, b = CATEGORY_COLORS["acknowledge"]
-        self._flash_simple(r, g, b, brightness=60, duration=0.15)
+        self._flash_simple(r, g, b, brightness=80, duration=0.5)
 
     def flash_category(self, category: str) -> None:
         """Flash the LED ring in the category color."""

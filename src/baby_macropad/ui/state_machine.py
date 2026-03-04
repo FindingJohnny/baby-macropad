@@ -99,14 +99,21 @@ class StateMachine:
                     return TickAction(action="wake_confirm_expired", mode="wake_confirm")
                 return TickAction(action="refresh", mode="wake_confirm")
 
-            # Sleep mode: refresh elapsed timer
+            # Sleep mode: refresh elapsed timer (once per minute — display shows minutes)
             if s.mode == "sleep_mode":
-                return TickAction(action="refresh", mode="sleep_mode")
+                if now - getattr(self, '_last_sleep_refresh', 0.0) >= 60:
+                    self._last_sleep_refresh = now
+                    return TickAction(action="refresh", mode="sleep_mode")
+                return TickAction(action="none", mode="sleep_mode")
 
-            # Home grid: refresh for live sleep timer or dirty flag
+            # Home grid: refresh for dirty flag or live sleep timer (once per minute)
             if s.mode == "home_grid":
-                if s.sleep_active or s._home_dirty:
+                if s._home_dirty:
                     return TickAction(action="refresh", mode="home_grid")
+                if s.sleep_active:
+                    if now - getattr(self, '_last_sleep_refresh', 0.0) >= 60:
+                        self._last_sleep_refresh = now
+                        return TickAction(action="refresh", mode="home_grid")
 
             return TickAction(action="none", mode=s.mode)
 

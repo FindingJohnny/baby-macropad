@@ -46,7 +46,7 @@ def _lighten(color: tuple[int, int, int], factor: float) -> tuple[int, int, int]
 
 def _to_jpeg(img: Image.Image) -> bytes:
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=90)
+    img.save(buf, format="JPEG", quality=50)
     return buf.getvalue()
 
 

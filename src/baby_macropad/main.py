@@ -110,6 +110,7 @@ class MacropadController:
 
         # LED controller (set after device init)
         self._led = LedController(self._device)
+        self._led.quiet_hours_setting = self._settings.quiet_hours
 
         # Sub-controllers — use lambda so queue replacement in tests propagates correctly
         self._sleep_mgr = SleepManager(
@@ -143,6 +144,7 @@ class MacropadController:
             self._device = StubDevice()
             self._device.open()
             self._led = LedController(self._device)
+            self._led.quiet_hours_setting = self._settings.quiet_hours
 
         self._device.set_brightness(self.config.device.brightness)
         self.refresh_display()
@@ -322,12 +324,28 @@ class MacropadController:
             return  # debounced
         t1 = time.monotonic()
 
-        self._led.flash_acknowledge()
+        # Determine category for acknowledge flash color hint
+        ack_category = "nav"
+        if snap.mode == "home_grid":
+            button = self.config.buttons.get(key)
+            if button:
+                icon = button.icon
+                if icon in ("breast_left", "breast_right", "bottle"):
+                    ack_category = "feeding"
+                elif icon in ("diaper_pee", "diaper_poop", "diaper_both"):
+                    ack_category = "diaper"
+                elif icon == "sleep":
+                    ack_category = "sleep_start"
+                elif icon == "pump":
+                    ack_category = "pump"
+                elif icon == "note":
+                    ack_category = "note"
+        self._led.flash_acknowledge(ack_category)
         t2 = time.monotonic()
 
         logger.info(
-            "Key %d pressed (mode=%s) debounce=%.1fms led=%.1fms",
-            key, snap.mode, (t1 - t0) * 1000, (t2 - t1) * 1000,
+            "Key %d pressed (mode=%s cat=%s) debounce=%.1fms led=%.1fms",
+            key, snap.mode, ack_category, (t1 - t0) * 1000, (t2 - t1) * 1000,
         )
 
         if snap.mode == "home_grid":
@@ -451,6 +469,8 @@ class MacropadController:
                 )
                 # Apply brightness immediately if that's what changed
                 self._device.set_brightness(self._settings.brightness)
+                # Sync quiet hours to LED controller
+                self._led.quiet_hours_setting = self._settings.quiet_hours
                 self.refresh_display()
                 return
 

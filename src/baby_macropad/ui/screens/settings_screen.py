@@ -32,6 +32,10 @@ def _format_value(field_name: str, value, extra: dict) -> str:
         "full_icon": "Icon",
         "split": "Split",
         "minimal": "Mini",
+        "off": "OFF",
+        "9pm-6am": "9\u20136",
+        "10pm-6am": "10\u20136",
+        "8pm-6am": "8\u20136",
     }
     if isinstance(value, str) and value in _SHORT_LABELS:
         return _SHORT_LABELS[value]

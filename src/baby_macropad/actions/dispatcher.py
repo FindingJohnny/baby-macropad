@@ -239,7 +239,7 @@ class ActionDispatcher:
             action_name = api_action.removeprefix("baby_basics.")
             self._sm.apply_optimistic_update(action_name, params)
             context_line = self._build_context_line(category)
-            self._led.flash_category(category)
+            self._led.flash_success(category)
         except (
             BabyBasicsAPIError, ConnectionError, httpx.TimeoutException, httpx.ConnectError
         ) as e:

@@ -51,6 +51,13 @@ class SettingsModel(BaseModel):
             "cycle_values": [20, 40, 60, 80, 100],
         },
     )
+    quiet_hours: str = Field(
+        default="off",
+        json_schema_extra={
+            "display_label": "Quiet",
+            "cycle_values": ["off", "9pm-6am", "10pm-6am", "8pm-6am"],
+        },
+    )
     tutorial_completed: bool = Field(
         default=False,
         json_schema_extra={"hidden": True},

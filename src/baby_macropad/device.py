@@ -12,6 +12,7 @@ Protocol reverse-engineered from Bitfocus Companion + strace of C library:
   - Brightness: CRT + LIG [0x4C,0x49,0x47,0,0,level]
   - Background image: CRT + LOG [0x4C,0x4F,0x47,size_be32,0x01] + JPEG chunks
   - LED color: CRT + SETLB [0x53,0x45,0x54,0x4C,0x42] + [R,G,B]*24
+  - LED brightness: CRT + LBLIG [0x4C,0x42,0x4C,0x49,0x47,level] (byte immediately after G)
   - LED reset: CRT + DELED [0x44,0x45,0x4C,0x45,0x44]
   - Button events: data[9]=key_code, data[10]=state (0x01=press, 0x02=release)
 
@@ -45,6 +46,7 @@ class DeviceProtocol(Protocol):
     def set_brightness(self, level: int) -> None: ...
     def set_screen_image(self, jpeg_data: bytes) -> None: ...
     def set_led_color(self, r: int, g: int, b: int) -> None: ...
+    def set_led_colors(self, rgb_data: bytes) -> None: ...
     def set_led_brightness(self, level: int) -> None: ...
     def reset_led_color(self) -> None: ...
     def turn_off_leds(self) -> None: ...
@@ -299,6 +301,14 @@ class StreamDockDevice:
         except OSError as e:
             logger.warning("Failed to set LED color: %s", e)
 
+    def set_led_colors(self, rgb_data: bytes) -> None:
+        """Set individual LED colors. rgb_data = 72 bytes (24 LEDs x 3 RGB)."""
+        assert len(rgb_data) == 72
+        try:
+            self._raw_write(_build_cmd(_CMD_SETLB + rgb_data))
+        except OSError as e:
+            logger.warning("Failed to set LED colors: %s", e)
+
     def reset_led_color(self) -> None:
         """Reset LED ring to firmware default via CRT+DELED command."""
         try:
@@ -307,11 +317,15 @@ class StreamDockDevice:
             logger.warning("Failed to reset LED color: %s", e)
 
     def set_led_brightness(self, level: int) -> None:
-        """Set LED ring brightness via CRT+LBLIG command."""
+        """Set LED ring brightness via CRT+LBLIG command.
+
+        Brightness byte goes immediately after LBLIG (offset 11 from start).
+        Confirmed via strace of SDK C library (libtransport_arm64.so).
+        """
         try:
             self._raw_write(_build_cmd(bytes([
                 0x4C, 0x42, 0x4C, 0x49, 0x47,  # "LBLIG"
-                0x00, 0x00, level,
+                level,
             ])))
         except OSError as e:
             logger.warning("Failed to set LED brightness: %s", e)
@@ -511,6 +525,9 @@ class StubDevice:
     def set_led_color(self, r: int, g: int, b: int) -> None:
         self._led_color = (r, g, b)
         logger.debug("Stub: LED color set to (%d, %d, %d)", r, g, b)
+
+    def set_led_colors(self, rgb_data: bytes) -> None:
+        logger.debug("Stub: LED colors set (%d bytes)", len(rgb_data))
 
     def set_led_brightness(self, level: int) -> None:
         logger.debug("Stub: LED brightness set to %d", level)

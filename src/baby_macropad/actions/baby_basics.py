@@ -97,7 +97,7 @@ class BabyBasicsClient:
     def end_sleep(self, sleep_id: str) -> dict[str, Any]:
         """PUT /children/:childId/sleeps/:id"""
         logger.info("Ending sleep: %s", sleep_id)
-        end_time = datetime.now(timezone.utc).isoformat()
+        end_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
         resp = self._client.put(f"/sleeps/{sleep_id}", json={"end_time": end_time})
         return self._handle_response(resp)
 

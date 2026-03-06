@@ -11,6 +11,7 @@ class TestSettingsDefaults:
         s = SettingsModel()
         assert s.timer_duration_seconds == 7
         assert s.skip_breast_detail is False
+        assert s.instant_log is True
         assert s.celebration_style == "flash"
         assert s.confirmation_layout == "banner"
         assert s.brightness == 80
@@ -50,6 +51,17 @@ class TestCycleField:
             s.cycle_field("skip_breast_detail")
             assert s.skip_breast_detail is False
 
+    def test_cycle_instant_log_toggles(self, tmp_path: Path):
+        with (
+            patch("baby_macropad.settings._SETTINGS_FILE", tmp_path / "s.yaml"),
+            patch("baby_macropad.settings._SETTINGS_DIR", tmp_path),
+        ):
+            s = SettingsModel(instant_log=True)
+            s.cycle_field("instant_log")
+            assert s.instant_log is False
+            s.cycle_field("instant_log")
+            assert s.instant_log is True
+
     def test_cycle_celebration_style(self, tmp_path: Path):
         with (
             patch("baby_macropad.settings._SETTINGS_FILE", tmp_path / "s.yaml"),
@@ -81,6 +93,8 @@ class TestCycleField:
             assert s.confirmation_layout == "split"
             s.cycle_field("confirmation_layout")
             assert s.confirmation_layout == "minimal"
+            s.cycle_field("confirmation_layout")
+            assert s.confirmation_layout == "data"
             s.cycle_field("confirmation_layout")
             assert s.confirmation_layout == "banner"
 

@@ -177,6 +177,11 @@ class StateMachine:
         with self._lock:
             self._state.exit_sleep_mode(ended_id=ended_id)
 
+    def select_detail_option(self, index: int) -> None:
+        with self._lock:
+            self._state.detail_selected_index = index
+            self._state.detail_default_index = index
+
     def return_home(self) -> None:
         with self._lock:
             self._state.return_home()

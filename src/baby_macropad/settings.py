@@ -28,6 +28,10 @@ class SettingsModel(BaseModel):
         default=False,
         json_schema_extra={"display_label": "Quick Log"},
     )
+    instant_log: bool = Field(
+        default=True,
+        json_schema_extra={"display_label": "Instant"},
+    )
     celebration_style: str = Field(
         default="flash",
         json_schema_extra={
@@ -40,7 +44,7 @@ class SettingsModel(BaseModel):
         json_schema_extra={
             "display_label": "Confirm",
             "cycle_values": [
-                "banner", "center_stage", "full_icon", "split", "minimal",
+                "banner", "center_stage", "full_icon", "split", "minimal", "data",
             ],
         },
     )

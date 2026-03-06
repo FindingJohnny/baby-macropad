@@ -187,8 +187,20 @@ class MacropadController:
 
             if s.mode == "sleep_mode":
                 elapsed, start_str = self._calc_sleep_elapsed()
-                screen = build_sleep_screen(elapsed, start_str)
-            elif s.mode == "wake_confirm" and now < s.wake_confirm_expires:
+                feed_count = None
+                dashboard = s.dashboard
+                if isinstance(dashboard, DashboardData) and dashboard.today_counts:
+                    feed_count = dashboard.today_counts.get("feedings")
+                screen = build_sleep_screen(elapsed, start_str, feed_count=feed_count)
+            elif s.mode == "wake_confirm" and s.wake_confirm_from_sleep:
+                # Reuse sleep data page with CONFIRM button (no timeout)
+                elapsed, start_str = self._calc_sleep_elapsed()
+                feed_count = None
+                dashboard = s.dashboard
+                if isinstance(dashboard, DashboardData) and dashboard.today_counts:
+                    feed_count = dashboard.today_counts.get("feedings")
+                screen = build_sleep_screen(elapsed, start_str, feed_count=feed_count, wake_pending=True)
+            elif s.mode == "wake_confirm" and (s.wake_confirm_expires == 0 or now < s.wake_confirm_expires):
                 elapsed, _ = self._calc_sleep_elapsed()
                 if elapsed >= 60:
                     elapsed_text = f"{elapsed // 60}h {elapsed % 60}m"
@@ -196,11 +208,12 @@ class MacropadController:
                     elapsed_text = f"{elapsed}m"
                 screen = build_detail_screen(
                     title="End Sleep?",
-                    options=[{"label": "WAKE", "key_num": 13, "selected": True}],
-                    timer_seconds=max(0, int(s.wake_confirm_expires - now)),
+                    options=[{"label": "WAKE", "key_num": 8, "selected": True}],
+                    timer_seconds=max(0, int(s.wake_confirm_expires - now)) if s.wake_confirm_expires > 0 else 0,
                     category_color=(102, 153, 204),
                     hint="Wake Up",
                     subtitle=elapsed_text,
+                    icon="moon",
                 )
             elif s.mode == "confirmation" and now < s.confirmation_expires:
                 screen = build_confirmation_screen(
@@ -209,16 +222,18 @@ class MacropadController:
                     resource_id=s.confirmation_resource_id,
                     icon=s.confirmation_icon,
                     layout=self._settings.confirmation_layout,
+                    dashboard=s.dashboard,
                 )
             elif s.mode == "detail" and (
                 s.detail_timer_expires == 0.0 or now < s.detail_timer_expires
             ):
                 cfg = DETAIL_CONFIGS.get(s.detail_action or "")
+                selected_idx = s.detail_selected_index if s.detail_selected_index is not None else s.detail_default_index
                 opts = [
                     {
                         "label": o["label"],
-                        "key_num": o.get("key", 11 + i),
-                        "selected": i == s.detail_default_index,
+                        "key_num": o.get("key", 6 + i),
+                        "selected": i == selected_idx,
                     }
                     for i, o in enumerate(s.detail_options)
                 ]
@@ -230,6 +245,8 @@ class MacropadController:
                     cfg["title"] if cfg else "DETAIL", opts,
                     remaining,
                     cfg["category_color"] if cfg else (200, 200, 200),
+                    icon=cfg["confirmation_icon"] if cfg else "",
+                    show_log_button=not self._settings.instant_log,
                 )
             elif s.mode == "notes_submenu":
                 cats = [
@@ -395,9 +412,20 @@ class MacropadController:
             self._sm.return_home()
             self.refresh_display()
             return
+        # LOG button (key 5) — commit currently selected option
+        if key == 5 and not self._settings.instant_log:
+            selected = self._sm.state.detail_selected_index
+            if selected is None:
+                selected = cfg["default_index"]
+            self._dispatcher.commit_detail_option(cfg, cfg["options"][selected])
+            return
         for i, opt in enumerate(cfg["options"]):
             if key == opt["key"]:
-                self._dispatcher.commit_detail_option(cfg, opt)
+                if self._settings.instant_log:
+                    self._dispatcher.commit_detail_option(cfg, opt)
+                else:
+                    self._sm.select_detail_option(i)
+                    self.refresh_display()
                 return
 
     def _handle_confirmation_press(self, key: int, snap: Any) -> None:
@@ -405,7 +433,7 @@ class MacropadController:
             self._dispatcher.cancel_celebration()
             self._undo_mgr.execute_undo()
             return
-        if key == 5:
+        if key in (5, 15):
             self._dispatcher.cancel_celebration()
             self._sm.return_home()
             self.refresh_display()
@@ -414,22 +442,39 @@ class MacropadController:
 
     def _handle_sleep_mode_press(self, key: int) -> None:
         self._device.set_brightness(self.config.device.brightness)
-        if key == 13:
+        if key == 5:
             self._sleep_mgr.enter_wake_confirm(from_sleep=True)
+        elif key == 1:
+            self._device.set_brightness(10)  # Re-dim (CANCEL)
+        elif key == 15:
+            self._sm.return_home()
+            self.refresh_display()
         else:
             self.refresh_display()
 
     def _handle_wake_confirm_press(self, key: int) -> None:
-        if key == 1:
-            # BACK → return to where we came from
-            if self._sm.state.wake_confirm_from_sleep:
+        if self._sm.state.wake_confirm_from_sleep:
+            # Sleep data page with CONFIRM/CANCEL buttons
+            if key == 5:
+                self._sleep_mgr.handle_wake_up()
+                return
+            if key == 1:
                 self._sm.resume_sleep_mode()
                 self._device.set_brightness(10)
-            else:
+                self.refresh_display()
+                return
+            if key == 15:
                 self._sm.return_home()
+                self.refresh_display()
+                return
+            # Other keys: just refresh (keep screen awake)
             self.refresh_display()
             return
-        if key == 13:
+        if key == 1:
+            self._sm.return_home()
+            self.refresh_display()
+            return
+        if key == 8:
             # Confirm → end sleep
             self._sleep_mgr.handle_wake_up()
             return
@@ -454,8 +499,8 @@ class MacropadController:
             self._sm.return_home()
             self.refresh_display()
             return
-        # Settings cards are at keys 11, 12, 13, 14, 15, 6, 7...
-        setting_keys = [11, 12, 13, 14, 15, 6, 7, 8, 9, 10]
+        # Settings cards at keys 6-10 (row 1) and 2-5 (row 2); row 0 is header
+        setting_keys = [6, 7, 8, 9, 10, 2, 3, 4, 5]
         visible_fields = [n for n, f in type(self._settings).model_fields.items()
                           if not (f.json_schema_extra or {}).get("hidden")]
         for i, field_name in enumerate(visible_fields):

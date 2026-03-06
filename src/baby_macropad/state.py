@@ -32,6 +32,7 @@ class DisplayState:
     detail_context: dict = field(default_factory=dict)  # accumulated API params
     detail_options: list[dict] = field(default_factory=list)  # option definitions
     detail_default_index: int = 0
+    detail_selected_index: int | None = None  # None = use default, int = user selected
     detail_timer_expires: float = 0.0  # time.monotonic() deadline
 
     # Confirmation screen
@@ -86,6 +87,7 @@ class DisplayState:
         self.detail_action = action
         self.detail_options = options
         self.detail_default_index = default_index
+        self.detail_selected_index = None
         self.detail_context = context
         self.detail_timer_expires = timer_expires
 
@@ -140,6 +142,7 @@ class DisplayState:
         self.detail_action = None
         self.detail_options = []
         self.detail_context = {}
+        self.detail_selected_index = None
         self.detail_timer_expires = 0.0
         self.confirmation_action = None
         self.confirmation_expires = 0.0

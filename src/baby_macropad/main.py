@@ -34,6 +34,7 @@ from baby_macropad.pairing.server import (
     generate_pairing_code,
     get_local_ip,
     has_valid_pairing,
+    load_pairing_config,
 )
 from baby_macropad.settings import SettingsModel
 from baby_macropad.state import DisplayState
@@ -588,6 +589,11 @@ class MacropadController:
 
     def _start_pairing(self, name: str) -> None:
         """Start the pairing server and transition to the QR screen."""
+        # Stop any previously running server
+        if self._pairing_server:
+            self._pairing_server.stop()
+            self._pairing_server = None
+
         code = generate_pairing_code()
         ip = get_local_ip()
         port = 31337
@@ -646,14 +652,30 @@ class MacropadController:
         )
 
     def _rebuild_api_client(self) -> None:
-        """Close old API client and create a new one for the selected server."""
-        new_url = SERVER_URLS.get(self._settings.server, SERVER_URLS["dev"])
-        logger.info("Switching API server to %s (%s)", self._settings.server, new_url)
+        """Close old API client and create a new one for the selected server.
+
+        Reads credentials from pairing.yaml first, falling back to config.yaml.
+        """
+        server = self._settings.server
+        new_url = SERVER_URLS.get(server, SERVER_URLS["dev"])
+        token = self.config.baby_basics.token
+        child_id = self.config.baby_basics.child_id
+
+        # Prefer per-server credentials from pairing file
+        pairing = load_pairing_config()
+        if pairing and isinstance(pairing.get(server), dict):
+            srv_cfg = pairing[server]
+            if srv_cfg.get("token"):
+                token = srv_cfg["token"]
+                child_id = srv_cfg.get("child_id", child_id)
+                new_url = srv_cfg.get("api_url", new_url)
+
+        logger.info("Switching API server to %s (%s)", server, new_url)
         self.api_client.close()
         self.api_client = BabyBasicsClient(
             api_url=new_url,
-            token=self.config.baby_basics.token,
-            child_id=self.config.baby_basics.child_id,
+            token=token,
+            child_id=child_id,
         )
 
     # --- Thin delegators for backwards compatibility ---

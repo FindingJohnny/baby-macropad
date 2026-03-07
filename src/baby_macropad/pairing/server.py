@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import secrets
 import socket
+import tempfile
 import threading
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -24,6 +26,8 @@ PAIRING_DIR = Path.home() / ".baby-macropad"
 PAIRING_FILE = PAIRING_DIR / "pairing.yaml"
 DEFAULT_PORT = 31337
 TIMEOUT_SECONDS = 300  # 5 minutes
+MAX_BODY_SIZE = 8192  # 8 KB
+VALID_SERVER_ENVS = {"dev", "prod"}
 
 
 def generate_pairing_code() -> str:
@@ -56,10 +60,16 @@ def load_pairing_config() -> dict | None:
 
 
 def save_pairing_config(config: dict) -> None:
-    """Save pairing config to disk."""
+    """Save pairing config to disk atomically."""
     PAIRING_DIR.mkdir(parents=True, exist_ok=True)
-    with open(PAIRING_FILE, "w") as f:
-        yaml.dump(config, f, default_flow_style=False)
+    fd, tmp_path = tempfile.mkstemp(dir=PAIRING_DIR, suffix=".yaml.tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            yaml.dump(config, f, default_flow_style=False)
+        os.replace(tmp_path, PAIRING_FILE)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
     logger.info("Pairing config saved to %s", PAIRING_FILE)
 
 
@@ -92,6 +102,7 @@ class PairingServer:
         self._thread: threading.Thread | None = None
         self._timer: threading.Timer | None = None
         self._paired = threading.Event()
+        self._stop_lock = threading.Lock()
 
     @property
     def paired(self) -> bool:
@@ -107,9 +118,9 @@ class PairingServer:
                     self.send_error(404)
                     return
 
-                # Validate pairing code from header
+                # Validate pairing code from header (timing-safe)
                 request_code = self.headers.get("X-Pairing-Code", "")
-                if request_code != server_ref.code:
+                if not secrets.compare_digest(request_code, server_ref.code):
                     self.send_response(403)
                     self.send_header("Content-Type", "application/json")
                     self.end_headers()
@@ -120,6 +131,9 @@ class PairingServer:
                 content_length = int(self.headers.get("Content-Length", 0))
                 if content_length == 0:
                     self.send_error(400, "empty body")
+                    return
+                if content_length > MAX_BODY_SIZE:
+                    self.send_error(413, "body too large")
                     return
 
                 try:
@@ -138,6 +152,13 @@ class PairingServer:
                     self.send_header("Content-Type", "application/json")
                     self.end_headers()
                     self.wfile.write(json.dumps({"error": "missing token, api_url, or child_id"}).encode())
+                    return
+
+                if server_env not in VALID_SERVER_ENVS:
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": "invalid server environment"}).encode())
                     return
 
                 # Save to config
@@ -184,11 +205,13 @@ class PairingServer:
         logger.info("Pairing server started on port %d (code=%s, name=%s)", self.port, self.code, self.name)
 
     def stop(self) -> None:
-        """Shut down the server."""
-        if self._timer:
-            self._timer.cancel()
-            self._timer = None
-        if self._server:
-            self._server.shutdown()
+        """Shut down the server (thread-safe, idempotent)."""
+        with self._stop_lock:
+            if self._timer:
+                self._timer.cancel()
+                self._timer = None
+            server = self._server
             self._server = None
-        logger.info("Pairing server stopped")
+        if server:
+            server.shutdown()
+            logger.info("Pairing server stopped")

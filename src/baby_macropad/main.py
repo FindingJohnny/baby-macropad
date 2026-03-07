@@ -24,10 +24,17 @@ from baby_macropad.actions.baby_basics import BabyBasicsClient, DashboardData
 from baby_macropad.actions.dispatcher import DETAIL_CONFIGS, ActionDispatcher
 from baby_macropad.actions.sleep_manager import SleepManager
 from baby_macropad.actions.undo import UndoManager
-from baby_macropad.config import MacropadConfig, load_config
+from baby_macropad.config import SERVER_URLS, MacropadConfig, load_config
 from baby_macropad.device import StreamDockDevice, StubDevice
 from baby_macropad.offline.queue import OfflineQueue
 from baby_macropad.offline.sync import SyncWorker
+from baby_macropad.pairing.qr import generate_qr_image
+from baby_macropad.pairing.server import (
+    PairingServer,
+    generate_pairing_code,
+    get_local_ip,
+    has_valid_pairing,
+)
 from baby_macropad.settings import SettingsModel
 from baby_macropad.state import DisplayState
 from baby_macropad.ui.framework.screen import ScreenRenderer
@@ -39,6 +46,11 @@ from baby_macropad.ui.screens.detail import build_detail_screen
 from baby_macropad.ui.screens.home import build_home_grid
 from baby_macropad.ui.screens.selection import build_selection_screen
 from baby_macropad.ui.screens.settings_screen import build_settings_screen
+from baby_macropad.ui.screens.setup_screen import (
+    NAME_PRESETS,
+    build_setup_name_screen,
+    build_setup_qr_screen,
+)
 from baby_macropad.ui.screens.sleep_screen import build_sleep_screen
 from baby_macropad.ui.state_machine import StateMachine
 
@@ -96,7 +108,7 @@ class MacropadController:
         # Offline queue
         self.queue = OfflineQueue()
         self.sync_worker = SyncWorker(
-            queue=self.queue, api_client=self.api_client,
+            queue=self.queue, get_api=lambda: self.api_client,
             on_sync_success=self._on_sync_success,
             on_sync_failure=self._on_sync_failure,
         )
@@ -112,22 +124,26 @@ class MacropadController:
         self._led = LedController(self._device)
         self._led.quiet_hours_setting = self._settings.quiet_hours
 
-        # Sub-controllers — use lambda so queue replacement in tests propagates correctly
+        # Sub-controllers — use lambdas so queue/api replacement propagates correctly
         self._sleep_mgr = SleepManager(
-            api_client=self.api_client, sm=self._sm, led=self._led,
+            get_api=lambda: self.api_client, sm=self._sm, led=self._led,
             device=self._device, get_queue=lambda: self.queue, brightness=config.device.brightness,
             refresh_display=self.refresh_display, refresh_dashboard=self._refresh_dashboard,
         )
         self._dispatcher = ActionDispatcher(
-            api_client=self.api_client, sm=self._sm, led=self._led,
+            get_api=lambda: self.api_client, sm=self._sm, led=self._led,
             device=self._device, get_queue=lambda: self.queue, renderer=self._renderer,
             refresh_display=self.refresh_display, refresh_dashboard=self._refresh_dashboard,
         )
         self._undo_mgr = UndoManager(
-            api_client=self.api_client, sm=self._sm, led=self._led,
+            get_api=lambda: self.api_client, sm=self._sm, led=self._led,
             get_queue=lambda: self.queue, refresh_display=self.refresh_display,
             refresh_dashboard=self._refresh_dashboard,
         )
+
+        # Pairing server (created on demand during setup flow)
+        self._pairing_server: PairingServer | None = None
+        self._qr_image = None
 
     def start(self) -> None:
         logger.info("Starting macropad controller")
@@ -147,6 +163,12 @@ class MacropadController:
             self._led.quiet_hours_setting = self._settings.quiet_hours
 
         self._device.set_brightness(self.config.device.brightness)
+
+        # Auto-enter setup mode if no valid pairing exists
+        if not has_valid_pairing(self._settings.server):
+            logger.info("No valid pairing found — entering setup mode")
+            self._sm.enter_setup_name()
+
         self.refresh_display()
         self._device.turn_off_leds()
         self._device.set_key_callback(self._on_key_press)
@@ -256,6 +278,21 @@ class MacropadController:
                 screen = build_selection_screen(cats, accent_color=(153, 153, 153))
             elif s.mode == "settings":
                 screen = build_settings_screen(self._settings)
+            elif s.mode == "setup_name":
+                screen = build_setup_name_screen()
+            elif s.mode == "setup_qr":
+                status = "Paired!" if s.setup_paired else "Waiting..."
+                qr_img = self._qr_image
+                if qr_img is None:
+                    # Fallback — generate a placeholder
+                    from PIL import Image as PILImage
+                    qr_img = PILImage.new("RGB", (50, 50), (0, 0, 0))
+                screen = build_setup_qr_screen(
+                    qr_image=qr_img,
+                    name=s.setup_name,
+                    code=s.setup_pairing_code,
+                    status=status,
+                )
             else:
                 if s.mode != "home_grid":
                     self._sm.return_home()
@@ -379,6 +416,10 @@ class MacropadController:
             self._handle_notes_submenu_press(key)
         elif snap.mode == "settings":
             self._handle_settings_press(key)
+        elif snap.mode == "setup_name":
+            self._handle_setup_name_press(key)
+        elif snap.mode == "setup_qr":
+            self._handle_setup_qr_press(key)
 
         logger.info("Key %d handler total=%.1fms", key, (time.monotonic() - t0) * 1000)
 
@@ -516,8 +557,104 @@ class MacropadController:
                 self._device.set_brightness(self._settings.brightness)
                 # Sync quiet hours to LED controller
                 self._led.quiet_hours_setting = self._settings.quiet_hours
+                # Recreate API client when server changes
+                if field_name == "server":
+                    self._rebuild_api_client()
                 self.refresh_display()
                 return
+
+    def _handle_setup_name_press(self, key: int) -> None:
+        if key == 1:
+            self._sm.return_home()
+            self.refresh_display()
+            return
+        option_keys = [11, 12, 13, 14, 15, 6, 7, 8, 9, 10, 2, 3, 4, 5]
+        for i, name in enumerate(NAME_PRESETS):
+            if i >= len(option_keys):
+                break
+            if key == option_keys[i]:
+                self._start_pairing(name)
+                return
+
+    def _handle_setup_qr_press(self, key: int) -> None:
+        if key == 1:
+            # BACK — stop pairing server, return to name selection
+            if self._pairing_server:
+                self._pairing_server.stop()
+                self._pairing_server = None
+            self._sm.enter_setup_name()
+            self.refresh_display()
+            return
+
+    def _start_pairing(self, name: str) -> None:
+        """Start the pairing server and transition to the QR screen."""
+        code = generate_pairing_code()
+        ip = get_local_ip()
+        port = 31337
+
+        self._pairing_server = PairingServer(
+            code=code,
+            name=name,
+            on_paired=self._on_pairing_complete,
+            port=port,
+        )
+        self._pairing_server.start()
+        actual_port = self._pairing_server.port
+
+        # Generate QR payload: IP:PORT:CODE:NAME
+        qr_data = f"{ip}:{actual_port}:{code}:{name}"
+        self._qr_image = generate_qr_image(qr_data)
+
+        self._sm.enter_setup_qr(name, code)
+        self.refresh_display()
+        logger.info("Pairing started: %s (QR payload: %s)", name, qr_data)
+
+    def _on_pairing_complete(self, config: dict) -> None:
+        """Called from pairing server thread when pairing succeeds."""
+        logger.info("Pairing complete! Config: %s", config)
+        self._sm.mark_setup_paired()
+        self.refresh_display()
+
+        # After 2s, rebuild API client and return home
+        def _finalize() -> None:
+            time.sleep(2)
+            self._rebuild_api_client_from_pairing(config)
+            self._sm.return_home()
+            self.refresh_display()
+            threading.Thread(target=self._refresh_dashboard, daemon=True).start()
+
+        threading.Thread(target=_finalize, daemon=True, name="pairing-finalize").start()
+
+    def _rebuild_api_client_from_pairing(self, config: dict) -> None:
+        """Rebuild API client using pairing config for the current server."""
+        server = self._settings.server
+        server_config = config.get(server, {})
+        api_url = server_config.get("api_url", SERVER_URLS.get(server, SERVER_URLS["dev"]))
+        token = server_config.get("token", "")
+        child_id = server_config.get("child_id", "")
+
+        if not token:
+            logger.warning("No token in pairing config for server %s", server)
+            return
+
+        logger.info("Rebuilding API client from pairing: server=%s url=%s", server, api_url)
+        self.api_client.close()
+        self.api_client = BabyBasicsClient(
+            api_url=api_url,
+            token=token,
+            child_id=child_id,
+        )
+
+    def _rebuild_api_client(self) -> None:
+        """Close old API client and create a new one for the selected server."""
+        new_url = SERVER_URLS.get(self._settings.server, SERVER_URLS["dev"])
+        logger.info("Switching API server to %s (%s)", self._settings.server, new_url)
+        self.api_client.close()
+        self.api_client = BabyBasicsClient(
+            api_url=new_url,
+            token=self.config.baby_basics.token,
+            child_id=self.config.baby_basics.child_id,
+        )
 
     # --- Thin delegators for backwards compatibility ---
 

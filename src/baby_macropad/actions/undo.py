@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import httpx
 
@@ -20,14 +20,14 @@ logger = logging.getLogger(__name__)
 class UndoManager:
     def __init__(
         self,
-        api_client: BabyBasicsClient,
+        get_api: Callable[[], BabyBasicsClient],
         sm: StateMachine,
         led: LedController,
         get_queue: Any,  # callable returning OfflineQueue
         refresh_display: Any,
         refresh_dashboard: Any,
     ) -> None:
-        self._api = api_client
+        self._get_api = get_api
         self._sm = sm
         self._led = led
         self._get_queue = get_queue
@@ -56,4 +56,4 @@ class UndoManager:
         threading.Thread(target=self._refresh_dashboard, daemon=True).start()
 
     def _delete_resource(self, resource_type: str, resource_id: str) -> None:
-        self._api.delete_resource(resource_type, resource_id)
+        self._get_api().delete_resource(resource_type, resource_id)

@@ -263,6 +263,22 @@ class StateMachine:
         with self._lock:
             self._state.mode = "notes_submenu"
 
+    def enter_setup_name(self) -> None:
+        with self._lock:
+            self._state.mode = "setup_name"
+            self._state.setup_paired = False
+
+    def enter_setup_qr(self, name: str, code: str) -> None:
+        with self._lock:
+            self._state.mode = "setup_qr"
+            self._state.setup_name = name
+            self._state.setup_pairing_code = code
+            self._state.setup_paired = False
+
+    def mark_setup_paired(self) -> None:
+        with self._lock:
+            self._state.setup_paired = True
+
     def resume_sleep_mode(self) -> None:
         with self._lock:
             self._state.mode = "sleep_mode"

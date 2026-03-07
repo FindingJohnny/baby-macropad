@@ -391,8 +391,8 @@ class TestSettingsScreen:
     def test_auto_generates_from_model(self):
         settings = SettingsModel()
         screen = build_settings_screen(settings)
-        # Header row (5 cells) + 7 non-hidden settings + 1 BACK = 13 cells
-        assert len(screen.cells) == 13
+        # Header row (5 cells) + 8 non-hidden settings + 1 BACK = 14 cells
+        assert len(screen.cells) == 14
 
     def test_back_at_key_1(self):
         settings = SettingsModel()

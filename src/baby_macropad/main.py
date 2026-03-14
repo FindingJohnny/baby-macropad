@@ -613,16 +613,17 @@ class MacropadController:
 
         self._sm.enter_setup_qr(name, code)
         self.refresh_display()
-        logger.info("Pairing started: %s (QR payload: %s)", name, qr_data)
+        logger.info("Pairing started: %s on port %d", name, actual_port)
 
     def _on_pairing_complete(self, config: dict) -> None:
         """Called from pairing server thread when pairing succeeds."""
-        logger.info("Pairing complete! Config: %s", config)
+        server = self._settings.server
+        logger.info("Pairing complete for server=%s", server)
         self._sm.mark_setup_paired()
-        self.refresh_display()
 
-        # After 2s, rebuild API client and return home
+        # All display/device work must happen off the request-handler thread
         def _finalize() -> None:
+            self.refresh_display()
             time.sleep(2)
             self._rebuild_api_client_from_pairing(config)
             self._sm.return_home()

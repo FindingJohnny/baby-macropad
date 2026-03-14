@@ -225,6 +225,48 @@ class TestPairingServer:
         finally:
             server.stop()
 
+    def test_rejects_invalid_server_env(self):
+        import http.client
+
+        server = PairingServer(code="ABCD", name="Test", port=0)
+        server.start()
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", server.port)
+            body = json.dumps({
+                "token": "t", "api_url": "u", "child_id": "c",
+                "server": "staging",
+            })
+            conn.request("POST", "/pair", body, {
+                "Content-Type": "application/json",
+                "X-Pairing-Code": "ABCD",
+            })
+            resp = conn.getresponse()
+            assert resp.status == 400
+            data = json.loads(resp.read())
+            assert "invalid server environment" in data["error"]
+            conn.close()
+        finally:
+            server.stop()
+
+    def test_rejects_oversized_body(self):
+        import http.client
+
+        server = PairingServer(code="ABCD", name="Test", port=0)
+        server.start()
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", server.port)
+            body = "x" * 9000  # exceeds MAX_BODY_SIZE (8192)
+            conn.request("POST", "/pair", body, {
+                "Content-Type": "application/json",
+                "Content-Length": str(len(body)),
+                "X-Pairing-Code": "ABCD",
+            })
+            resp = conn.getresponse()
+            assert resp.status == 413
+            conn.close()
+        finally:
+            server.stop()
+
     def test_404_on_wrong_path(self):
         import http.client
 

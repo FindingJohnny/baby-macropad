@@ -69,30 +69,30 @@ def build_setup_qr_screen(
 
     # --- Row 1: Labels (cols 1-3) ---
     cells[7] = CellDef(
-        widget=Text(text="NAME", color=SECONDARY_TEXT, font_sizes=(11, 10, 9), valign="bottom"),
+        widget=Text(text="NAME", color=SECONDARY_TEXT, font_sizes=(11, 10, 9)),
         key_num=7,
     )
     cells[8] = CellDef(
-        widget=Text(text="CODE", color=SECONDARY_TEXT, font_sizes=(11, 10, 9), valign="bottom"),
+        widget=Text(text="CODE", color=SECONDARY_TEXT, font_sizes=(11, 10, 9)),
         key_num=8,
     )
     cells[9] = CellDef(
-        widget=Text(text="STATUS", color=SECONDARY_TEXT, font_sizes=(11, 10, 9), valign="bottom"),
+        widget=Text(text="STATUS", color=SECONDARY_TEXT, font_sizes=(11, 10, 9)),
         key_num=9,
     )
 
     # --- Row 2: Values (cols 1-3) ---
     cells[2] = CellDef(
-        widget=Text(text=name, color=_SETUP_COLOR, font_sizes=(14, 12, 10), valign="top"),
+        widget=Text(text=name, color=_SETUP_COLOR, font_sizes=(14, 12, 10)),
         key_num=2,
     )
     cells[3] = CellDef(
-        widget=Text(text=code, color=_SETUP_COLOR, font_sizes=(16, 14, 12), valign="top"),
+        widget=Text(text=code, color=_SETUP_COLOR, font_sizes=(16, 14, 12)),
         key_num=3,
     )
     status_color = (102, 204, 102) if status == "Paired!" else _SETUP_COLOR
     cells[4] = CellDef(
-        widget=Text(text=status, color=status_color, font_sizes=(14, 12, 10), valign="top"),
+        widget=Text(text=status, color=status_color, font_sizes=(14, 12, 10)),
         key_num=4,
     )
 

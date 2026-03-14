@@ -202,7 +202,7 @@ class PairingServer:
         self._timer.daemon = True
         self._timer.start()
 
-        logger.info("Pairing server started on port %d (code=%s, name=%s)", self.port, self.code, self.name)
+        logger.info("Pairing server started on port %d (name=%s)", self.port, self.name)
 
     def stop(self) -> None:
         """Shut down the server (thread-safe, idempotent)."""

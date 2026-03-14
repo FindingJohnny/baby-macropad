@@ -45,6 +45,8 @@ ICON_COLORS = {
     "diaper_pee": (204, 170, 68),     # Warm amber
     "diaper_poop": (204, 170, 68),
     "diaper_both": (204, 170, 68),
+    "ec_catch": (204, 170, 68),
+    "ec_miss": (204, 170, 68),
     "sleep": (102, 153, 204),         # Soft blue
     "note": (153, 153, 153),          # Warm gray
     "settings": (200, 200, 200),      # Neutral gray
@@ -65,6 +67,8 @@ ICON_ASSETS: dict[str, str | tuple[str, str]] = {
     "diaper_pee": "diaper",
     "diaper_poop": "poo",
     "diaper_both": ("poo", "diaper"),
+    "ec_catch": ("check", "diaper"),
+    "ec_miss": "diaper",
     "sleep": "moon",
     "note": "note",
     "settings": "gear",
@@ -83,6 +87,8 @@ ICON_LABELS = {
     "diaper_pee": "PEE",
     "diaper_poop": "POOP",
     "diaper_both": "BOTH",
+    "ec_catch": "EC CATCH",
+    "ec_miss": "EC MISS",
     "sleep": "SLEEP",
     "note": "NOTES",
     "settings": "SETTINGS",

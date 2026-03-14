@@ -94,7 +94,7 @@ class TestSyncWorker:
         queue.enqueue("baby_basics.log_feeding", {"type": "breast", "started_side": "left"})
         queue.enqueue("baby_basics.log_diaper", {"type": "pee"})
 
-        worker = SyncWorker(queue=queue, api_client=mock_client)
+        worker = SyncWorker(queue=queue, get_api=lambda: mock_client)
         synced = worker.flush_now()
 
         assert synced == 2
@@ -107,7 +107,7 @@ class TestSyncWorker:
         queue.enqueue("baby_basics.log_diaper", {"type": "pee"})
         mock_client.log_feeding.side_effect = ConnectionError("No network")
 
-        worker = SyncWorker(queue=queue, api_client=mock_client)
+        worker = SyncWorker(queue=queue, get_api=lambda: mock_client)
         synced = worker.flush_now()
 
         assert synced == 0
@@ -122,7 +122,7 @@ class TestSyncWorker:
         for _ in range(5):
             queue.mark_failed(event_id, "error")
 
-        worker = SyncWorker(queue=queue, api_client=mock_client)
+        worker = SyncWorker(queue=queue, get_api=lambda: mock_client)
         synced = worker.flush_now()
 
         assert synced == 0
@@ -131,14 +131,14 @@ class TestSyncWorker:
 
     def test_dispatch_toggle_sleep(self, queue: OfflineQueue, mock_client: MagicMock):
         queue.enqueue("baby_basics.toggle_sleep", {})
-        worker = SyncWorker(queue=queue, api_client=mock_client)
+        worker = SyncWorker(queue=queue, get_api=lambda: mock_client)
         synced = worker.flush_now()
         assert synced == 1
         mock_client.toggle_sleep.assert_called_once()
 
     def test_dispatch_log_note(self, queue: OfflineQueue, mock_client: MagicMock):
         queue.enqueue("baby_basics.log_note", {"content": "Quick note"})
-        worker = SyncWorker(queue=queue, api_client=mock_client)
+        worker = SyncWorker(queue=queue, get_api=lambda: mock_client)
         synced = worker.flush_now()
         assert synced == 1
         mock_client.log_note.assert_called_once_with(content="Quick note")
@@ -150,7 +150,7 @@ class TestSyncWorker:
 
         worker = SyncWorker(
             queue=queue,
-            api_client=mock_client,
+            get_api=lambda: mock_client,
             on_sync_success=on_success,
             on_sync_failure=on_failure,
         )

@@ -120,6 +120,19 @@ class TestCycleField:
             assert s.timer_duration_seconds == 5
 
 
+    def test_cycle_server(self, tmp_path: Path):
+        with (
+            patch("baby_macropad.settings._SETTINGS_FILE", tmp_path / "s.yaml"),
+            patch("baby_macropad.settings._SETTINGS_DIR", tmp_path),
+        ):
+            s = SettingsModel()
+            assert s.server == "dev"
+            s.cycle_field("server")
+            assert s.server == "prod"
+            s.cycle_field("server")
+            assert s.server == "dev"
+
+
 class TestSaveLoad:
     def test_roundtrip(self, tmp_path: Path):
         settings_file = tmp_path / "settings.yaml"

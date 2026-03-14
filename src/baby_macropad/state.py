@@ -20,6 +20,8 @@ ScreenMode = Literal[
     "wake_confirm",
     "notes_submenu",
     "settings",
+    "setup_name",
+    "setup_qr",
 ]
 
 
@@ -70,6 +72,11 @@ class DisplayState:
 
     # Recent actions for undo in settings (last 5)
     recent_actions: list[dict] = field(default_factory=list)
+
+    # Setup/pairing state
+    setup_name: str = ""
+    setup_pairing_code: str = ""
+    setup_paired: bool = False
 
     # Dirty flag: signals home grid needs re-render
     _home_dirty: bool = False

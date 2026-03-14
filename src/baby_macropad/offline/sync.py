@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from baby_macropad.offline.queue import OfflineQueue, QueuedEvent
 
@@ -26,13 +26,13 @@ class SyncWorker:
     def __init__(
         self,
         queue: OfflineQueue,
-        api_client: BabyBasicsClient,
+        get_api: Callable[[], Any],
         on_sync_success: Callable[[QueuedEvent], None] | None = None,
         on_sync_failure: Callable[[QueuedEvent, str], None] | None = None,
         poll_interval: float = 10.0,
     ):
         self.queue = queue
-        self.api_client = api_client
+        self._get_api = get_api
         self.on_sync_success = on_sync_success
         self.on_sync_failure = on_sync_failure
         self.poll_interval = poll_interval
@@ -99,13 +99,13 @@ class SyncWorker:
         params = event.params
 
         if action == "baby_basics.log_feeding":
-            self.api_client.log_feeding(**params)
+            self._get_api().log_feeding(**params)
         elif action == "baby_basics.log_diaper":
-            self.api_client.log_diaper(**params)
+            self._get_api().log_diaper(**params)
         elif action == "baby_basics.toggle_sleep":
-            self.api_client.toggle_sleep()
+            self._get_api().toggle_sleep()
         elif action == "baby_basics.log_note":
-            self.api_client.log_note(**params)
+            self._get_api().log_note(**params)
         else:
             logger.error("Unknown action in queue: %s", action)
             raise ValueError(f"Unknown action: {action}")

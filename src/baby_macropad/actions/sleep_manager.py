@@ -5,7 +5,7 @@ import logging
 import threading
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import httpx
 
@@ -25,7 +25,7 @@ CONFIRMATION_DURATION = 5.0
 class SleepManager:
     def __init__(
         self,
-        api_client: BabyBasicsClient,
+        get_api: Callable[[], BabyBasicsClient],
         sm: StateMachine,
         led: LedController,
         device: DeviceProtocol,
@@ -34,7 +34,7 @@ class SleepManager:
         refresh_display: Any,  # callback
         refresh_dashboard: Any,  # callback
     ) -> None:
-        self._api = api_client
+        self._get_api = get_api
         self._sm = sm
         self._led = led
         self._device = device
@@ -57,7 +57,7 @@ class SleepManager:
                 self.enter_wake_confirm()
             return
         try:
-            result = self._api.start_sleep()
+            result = self._get_api().start_sleep()
             data = result.get("sleep", result)
             start_time = data.get("start_time", datetime.now(UTC).isoformat())
             self._sm.enter_sleep_mode(data.get("id", ""), start_time)
@@ -74,8 +74,11 @@ class SleepManager:
 
     def enter_wake_confirm(self, from_sleep: bool = False) -> None:
         """Show wake confirmation screen before ending sleep."""
-        timer = self._sm.state.timer_seconds
-        expires = time.monotonic() + (timer if timer > 0 else 7)
+        if from_sleep:
+            expires = 0.0  # No timeout — sleep data page stays indefinitely
+        else:
+            timer = self._sm.state.timer_seconds
+            expires = time.monotonic() + (timer if timer > 0 else 7)
         self._sm.enter_wake_confirm(expires, from_sleep)
         self._refresh_display()
 
@@ -90,7 +93,7 @@ class SleepManager:
     def _end_sleep(self, sleep_id: str) -> None:
         self._device.set_brightness(self._brightness)
         try:
-            self._api.end_sleep(sleep_id)
+            self._get_api().end_sleep(sleep_id)
             start_time = self._sm.get_sleep_start_time()
             duration_str = self._calc_duration_str(start_time)
             self._sm.exit_sleep_mode(ended_id=sleep_id)

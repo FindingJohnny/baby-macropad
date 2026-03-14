@@ -5,7 +5,7 @@ import logging
 import threading
 import time
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import httpx
 
@@ -28,8 +28,8 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
     "breast_left": {
         "title": "LEFT",
         "options": [
-            {"label": "One", "key": 12, "value": {"both_sides": False}},
-            {"label": "Both", "key": 13, "value": {"both_sides": True}},
+            {"label": "One", "key": 7, "value": {"both_sides": False}},
+            {"label": "Both", "key": 8, "value": {"both_sides": True}},
         ],
         "default_index": 0,
         "category_color": (102, 204, 102), "category": "feeding",
@@ -41,8 +41,8 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
     "breast_right": {
         "title": "RIGHT",
         "options": [
-            {"label": "One", "key": 12, "value": {"both_sides": False}},
-            {"label": "Both", "key": 13, "value": {"both_sides": True}},
+            {"label": "One", "key": 7, "value": {"both_sides": False}},
+            {"label": "Both", "key": 8, "value": {"both_sides": True}},
         ],
         "default_index": 0,
         "category_color": (102, 204, 102), "category": "feeding",
@@ -54,9 +54,9 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
     "bottle": {
         "title": "BOTTLE",
         "options": [
-            {"label": "Formula", "key": 12, "value": {"source": "formula"}},
-            {"label": "Brst Milk", "key": 13, "value": {"source": "breast_milk"}},
-            {"label": "Skip", "key": 14, "value": {}},
+            {"label": "Formula", "key": 7, "value": {"source": "formula"}},
+            {"label": "Brst Milk", "key": 8, "value": {"source": "breast_milk"}},
+            {"label": "Skip", "key": 9, "value": {}},
         ],
         "default_index": 0,
         "category_color": (102, 204, 102), "category": "feeding",
@@ -68,7 +68,7 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
     "pee": {
         "title": "PEE",
         "options": [
-            {"label": "Log", "key": 13, "value": {}},
+            {"label": "Log", "key": 8, "value": {}},
         ],
         "default_index": 0,
         "category_color": (204, 170, 68), "category": "diaper",
@@ -80,10 +80,10 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
     "poop": {
         "title": "POOP",
         "options": [
-            {"label": "Watery", "key": 11, "value": {"consistency": "watery"}},
-            {"label": "Loose", "key": 12, "value": {"consistency": "loose"}},
-            {"label": "Formed", "key": 13, "value": {"consistency": "formed"}},
-            {"label": "Hard", "key": 14, "value": {"consistency": "hard"}},
+            {"label": "Watery", "key": 6, "value": {"consistency": "watery"}},
+            {"label": "Loose", "key": 7, "value": {"consistency": "loose"}},
+            {"label": "Formed", "key": 8, "value": {"consistency": "formed"}},
+            {"label": "Hard", "key": 9, "value": {"consistency": "hard"}},
         ],
         "default_index": 2,
         "category_color": (204, 170, 68), "category": "diaper",
@@ -95,10 +95,10 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
     "both": {
         "title": "PEE + POOP",
         "options": [
-            {"label": "Watery", "key": 11, "value": {"consistency": "watery"}},
-            {"label": "Loose", "key": 12, "value": {"consistency": "loose"}},
-            {"label": "Formed", "key": 13, "value": {"consistency": "formed"}},
-            {"label": "Hard", "key": 14, "value": {"consistency": "hard"}},
+            {"label": "Watery", "key": 6, "value": {"consistency": "watery"}},
+            {"label": "Loose", "key": 7, "value": {"consistency": "loose"}},
+            {"label": "Formed", "key": 8, "value": {"consistency": "formed"}},
+            {"label": "Hard", "key": 9, "value": {"consistency": "hard"}},
         ],
         "default_index": 2,
         "category_color": (204, 170, 68), "category": "diaper",
@@ -122,7 +122,7 @@ _KEY_TO_COLUMN: dict[int, int] = {
 class ActionDispatcher:
     def __init__(
         self,
-        api_client: BabyBasicsClient,
+        get_api: Callable[[], BabyBasicsClient],
         sm: StateMachine,
         led: LedController,
         device: DeviceProtocol,
@@ -131,7 +131,7 @@ class ActionDispatcher:
         refresh_display: Any,
         refresh_dashboard: Any,
     ) -> None:
-        self._api = api_client
+        self._get_api = get_api
         self._sm = sm
         self._led = led
         self._device = device
@@ -196,13 +196,13 @@ class ActionDispatcher:
         self, api_action: str, params: dict, label: str, icon: str,
         category_color: tuple[int, int, int], category: str, column: int, resource_type: str,
     ) -> None:
-        # Show confirmation screen immediately (optimistic)
+        # Enter confirmation mode (prevents double-presses, stops detail timer)
+        # but don't refresh display — old screen stays visible during brief API call
         self._celebration_cancelled.clear()
         self._sm.enter_confirmation(
             api_action, label, "Logging\u2026", icon, category_color, column,
             time.monotonic() + CONFIRMATION_DURATION, None, resource_type,
         )
-        self._refresh_display()
 
         # API call + celebration happen in background
         self._background_thread = threading.Thread(
@@ -255,13 +255,13 @@ class ActionDispatcher:
                 "label": label, "timestamp": datetime.now(UTC).isoformat(),
             })
 
-        # Update display if user hasn't navigated away
+        # Celebration BEFORE showing complete screen (transition effect)
+        self._play_celebration(category_color, self._sm.state.celebration_style)
+
+        # Now update display with real data
         if self._sm.mode == "confirmation":
             self._sm.update_confirmation(context_line, resource_id, resource_type)
             self._refresh_display()
-
-        # Celebration after API + display update (visual candy, not blocking)
-        self._play_celebration(category_color, self._sm.state.celebration_style)
 
         self._refresh_dashboard()
 
@@ -313,13 +313,13 @@ class ActionDispatcher:
 
     def dispatch_action(self, action: str, params: dict) -> Any:
         if action == "baby_basics.log_feeding":
-            return self._api.log_feeding(**params)
+            return self._get_api().log_feeding(**params)
         elif action == "baby_basics.log_diaper":
-            return self._api.log_diaper(**params)
+            return self._get_api().log_diaper(**params)
         elif action == "baby_basics.toggle_sleep":
-            return self._api.toggle_sleep(dashboard=self._sm.state.dashboard)
+            return self._get_api().toggle_sleep(dashboard=self._sm.state.dashboard)
         elif action == "baby_basics.log_note":
-            return self._api.log_note(**params)
+            return self._get_api().log_note(**params)
         elif action.startswith("home_assistant."):
             return None
         else:

@@ -62,6 +62,13 @@ class SettingsModel(BaseModel):
             "cycle_values": ["off", "9pm-6am", "10pm-6am", "8pm-6am"],
         },
     )
+    server: str = Field(
+        default="dev",
+        json_schema_extra={
+            "display_label": "Server",
+            "cycle_values": ["dev", "prod"],
+        },
+    )
     tutorial_completed: bool = Field(
         default=False,
         json_schema_extra={"hidden": True},

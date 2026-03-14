@@ -182,6 +182,7 @@ def render_dashboard(
     feeds = counts.get("feedings", 0)
     pee = counts.get("pee", counts.get("diapers_pee", 0))
     poop = counts.get("poop", counts.get("diapers_poop", 0))
+    misses = counts.get("misses", 0)
     sleep_hrs = counts.get("sleep_hours", 0)
 
     if isinstance(sleep_hrs, (int, float)):
@@ -189,7 +190,10 @@ def render_dashboard(
     else:
         sleep_str = str(sleep_hrs)
 
-    summary = f"TODAY:  {feeds} feeds  |  {pee} pee  |  {poop} poop  |  {sleep_str} sleep"
+    summary = f"TODAY:  {feeds} feeds  |  {pee} pee  |  {poop} poop"
+    if misses:
+        summary += f"  |  {misses} miss"
+    summary += f"  |  {sleep_str} sleep"
     draw.text((16, 230), summary, fill=TEXT_SECONDARY, font=font_sm)
 
     return img

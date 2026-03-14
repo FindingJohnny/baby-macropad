@@ -330,5 +330,11 @@ class StateMachine:
                     counts["diapers_pee"] = counts.get("diapers_pee", 0) + 1
                 if diaper_type in ("poop", "both"):
                     counts["diapers_poop"] = counts.get("diapers_poop", 0) + 1
+                if diaper_type == "miss":
+                    counts["misses"] = counts.get("misses", 0) + 1
+                if params.get("ec_attempt"):
+                    counts["ec_attempts"] = counts.get("ec_attempts", 0) + 1
+                    if params.get("ec_success"):
+                        counts["ec_catches"] = counts.get("ec_catches", 0) + 1
 
             self._state._home_dirty = True

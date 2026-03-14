@@ -262,6 +262,33 @@ class TestApplyOptimisticUpdate:
         assert sm.state.dashboard.today_counts["diapers_pee"] == 3
         assert sm.state.dashboard.today_counts["diapers_poop"] == 2
 
+    def test_miss_diaper_increments_misses(self):
+        sm = self._make_sm_with_dashboard()
+        sm.apply_optimistic_update("log_diaper", {"type": "miss", "ec_attempt": True, "ec_success": False})
+        assert sm.state.dashboard.today_counts["misses"] == 1
+
+    def test_ec_catch_increments_ec_counts(self):
+        sm = self._make_sm_with_dashboard()
+        sm.apply_optimistic_update("log_diaper", {"type": "pee", "ec_attempt": True, "ec_success": True})
+        counts = sm.state.dashboard.today_counts
+        assert counts["diapers_pee"] == 4  # was 3
+        assert counts["ec_attempts"] == 1
+        assert counts["ec_catches"] == 1
+
+    def test_ec_miss_increments_attempt_not_catch(self):
+        sm = self._make_sm_with_dashboard()
+        sm.apply_optimistic_update("log_diaper", {"type": "miss", "ec_attempt": True, "ec_success": False})
+        counts = sm.state.dashboard.today_counts
+        assert counts["ec_attempts"] == 1
+        assert counts.get("ec_catches", 0) == 0
+
+    def test_non_ec_diaper_does_not_increment_ec(self):
+        sm = self._make_sm_with_dashboard()
+        sm.apply_optimistic_update("log_diaper", {"type": "pee"})
+        counts = sm.state.dashboard.today_counts
+        assert counts.get("ec_attempts", 0) == 0
+        assert counts.get("ec_catches", 0) == 0
+
 
 class TestConcurrentThreadSafety:
     def test_atomic_snapshot_consistency(self):

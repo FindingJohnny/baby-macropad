@@ -107,11 +107,38 @@ DETAIL_CONFIGS: dict[str, dict[str, Any]] = {
         "confirmation_label": "Pee +\nPoop", "confirmation_icon": "diaper_both",
         "resource_type": "diapers", "column": 1,
     },
+    "ec_catch": {
+        "title": "EC CATCH",
+        "options": [
+            {"label": "Pee", "key": 7, "value": {"type": "pee"}},
+            {"label": "Poop", "key": 8, "value": {"type": "poop"}},
+            {"label": "Both", "key": 9, "value": {"type": "both"}},
+        ],
+        "default_index": 0,
+        "category_color": (204, 170, 68), "category": "diaper",
+        "api_action": "baby_basics.log_diaper",
+        "base_params": {"ec_attempt": True, "ec_success": True},
+        "confirmation_label": "EC\nCatch", "confirmation_icon": "ec_catch",
+        "resource_type": "diapers", "column": 1,
+    },
+    "ec_miss": {
+        "title": "EC MISS",
+        "options": [
+            {"label": "Log", "key": 8, "value": {}},
+        ],
+        "default_index": 0,
+        "category_color": (204, 170, 68), "category": "diaper",
+        "api_action": "baby_basics.log_diaper",
+        "base_params": {"type": "miss", "ec_attempt": True, "ec_success": False},
+        "confirmation_label": "EC\nMiss", "confirmation_icon": "ec_miss",
+        "resource_type": "diapers", "column": 1,
+    },
 }
 
 _ICON_TO_DETAIL: dict[str, str] = {
     "breast_left": "breast_left", "breast_right": "breast_right",
     "bottle": "bottle", "diaper_pee": "pee", "diaper_poop": "poop", "diaper_both": "both",
+    "ec_catch": "ec_catch", "ec_miss": "ec_miss",
 }
 _KEY_TO_COLUMN: dict[int, int] = {
     11: 0, 6: 0, 1: 0, 12: 1, 7: 1, 2: 1, 13: 2, 8: 2, 3: 2,
@@ -305,7 +332,10 @@ class ActionDispatcher:
             side = dashboard.suggested_side
             return f"Next: {side[0].upper()}" if side else f"{counts.get('feedings', 0)} feeds"
         elif category == "diaper":
-            total = counts.get("diapers_pee", 0) + counts.get("diapers_poop", 0)
+            pee = counts.get("diapers_pee", 0)
+            poop = counts.get("diapers_poop", 0)
+            misses = counts.get("misses", 0)
+            total = pee + poop + misses
             return f"{total} diapers"
         elif category == "pump":
             return "Pumped"
